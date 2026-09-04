@@ -1,6 +1,7 @@
 # Agentor: Agent Orchestrator
 
 [![Build and Push Docker Images](https://github.com/lonetis/agentor/actions/workflows/docker-build.yml/badge.svg?branch=main)](https://github.com/lonetis/agentor/actions/workflows/docker-build.yml)
+[![Refresh Docker Images](https://github.com/lonetis/agentor/actions/workflows/docker-refresh.yml/badge.svg)](https://github.com/lonetis/agentor/actions/workflows/docker-refresh.yml)
 
 Self-hosted alternative to Claude Code Web, Codex in the Cloud, and similar managed agent environments. Spawns isolated AI coding agent workers in Docker containers, each with a live terminal, VS Code editor (browser + native tunnel), virtual desktop, TCP port + domain mapping, and GitHub integration, all managed through a web dashboard. Full control over the runtime environment.
 
@@ -109,6 +110,9 @@ Open **http://localhost:3000**
 
 > [!NOTE]
 > The production compose file sets `WORKER_IMAGE_PREFIX=ghcr.io/lonetis/` so the orchestrator pulls worker images from GHCR automatically. Docker will pull images on first container creation.
+
+> [!NOTE]
+> The `latest` images are rebuilt every Monday so the base OS, apt packages, and the Claude/Codex/Gemini CLIs stay current. Each rebuild is smoke-tested on amd64 and arm64 before `latest` moves, and is also kept as a dated `refresh-YYYYMMDD` tag — pin the compose file to one of those if you need a fixed build. Use the dashboard's Images panel to pull updates into a running deployment.
 
 > [!NOTE]
 > The Traefik reverse proxy (`agentor-traefik`) is managed automatically by the orchestrator and handles both port mappings and domain mappings on the same container. It is created when the first port/domain mapping is added (or the dashboard subdomain is configured) and removed when all of those are gone. Mapped ports are arbitrary — no fixed ranges — but `80`/`443` are reserved when domain routing is active.

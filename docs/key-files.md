@@ -4,7 +4,9 @@
 - `.env.example` - All orchestrator-wide environment variables (logging, Traefik, dashboard auth, ACME). User-scoped secrets (agent API keys, GitHub token, custom env vars) live in the dashboard's Account modal, not here.
 - `docker-compose.prod.yml` - Production Docker Compose configuration (GHCR images)
 - `docker-compose.dev.yml` - Development Docker Compose (hot reload via mounted source)
-- `.github/workflows/docker-build.yml` - CI: multi-arch image builds for all components
+- `.github/workflows/docker-image.yml` - CI: reusable single-image build (per-arch build pushed by digest + multi-arch manifest merge). Inputs: `image`, `context`, `push`, `refresh` (no-cache + re-pull base image), `tags`.
+- `.github/workflows/docker-build.yml` - CI: source-change builds (push/PR) — paths-filter + two calls into `docker-image.yml`
+- `.github/workflows/docker-refresh.yml` - CI: weekly (Mon 04:00 UTC) + manual dependency refresh — cache-free rebuild of both images, smoke-tested on amd64 + arm64, then promoted to `latest`/`main`
 
 ## Orchestrator — Config
 - `orchestrator/app.config.ts` - App-level configuration

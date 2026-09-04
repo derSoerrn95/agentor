@@ -31,7 +31,7 @@ Three managed containers:
 | UI | @docs/ui.md | Split pane layout, tmux tab integration, theme system, VS Code editor, UI state persistence |
 | Environments | @docs/environments.md | Environment system, network firewall, capabilities, instructions, worker API exposure |
 | Logging | @docs/logging.md | Centralized logging, log collection, rotation, WebSocket streaming, log pane UI |
-| Production | @docs/production.md | Update mechanism, agent usage monitoring |
+| Production | @docs/production.md | Update mechanism, weekly CI image dependency refresh, agent usage monitoring |
 | Apps | @docs/apps.md | Modular app system, adding new apps |
 | API | @docs/api.md | API documentation (OpenAPI), adding docs to routes |
 | Key Files | @docs/key-files.md | Complete file listing (server, client, worker, tests) |

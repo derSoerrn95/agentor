@@ -18,6 +18,48 @@ Automatic image update detection and per-image or bulk updates for production de
 
 **No version numbers** — only image digest hashes (sha256) are compared and displayed. Workers are NOT automatically restarted; they pick up the new image when next created or unarchived.
 
+## Image Dependency Refresh (CI)
+
+The `latest` images are rebuilt on a schedule so unpinned dependencies do not
+drift. Nothing in the repo is pinned to a version — the base images, every apt
+package, and the Claude / Codex / Gemini CLIs all resolve at build time — so a
+rebuild of the same Dockerfile is what picks up upstream updates. Without a
+scheduled rebuild, `latest` would freeze at whatever was current on the last
+source change.
+
+`.github/workflows/docker-refresh.yml` runs **Mondays 04:00 UTC** and on manual
+dispatch (Actions → Refresh Docker Images → Run workflow):
+
+1. **Rebuild both images cache-free.** Calls the shared
+   `docker-image.yml` with `refresh: true`, which sets `no-cache` (so the
+   `apt-get install` / CLI-install layers actually re-run instead of being
+   restored from the GHA cache) and `pull` (so `ubuntu:24.04` and
+   `node:22-alpine` re-resolve to the current digest). The refreshed layers are
+   still exported to the build cache, so the next source-change build starts
+   from them rather than from stale ones.
+2. **Publish under a dated tag only** — `refresh-YYYYMMDD`. `latest` is not
+   touched yet.
+3. **Smoke-test on amd64 and arm64.** The worker image must report versions for
+   `claude`, `codex`, `gemini`, node, npm, git, tmux, chromium and code-server,
+   and carry the expected binaries (`gh`, `code`, `docker`, `dnsmasq`,
+   `microsocks`, `x11vnc`, `Xvfb`, `sshd`). The orchestrator image must boot
+   against a Docker socket and answer `GET /api/health` with `status: ok`.
+4. **Promote to `latest` + `main`** by retagging the verified manifest (no
+   layers re-uploaded).
+
+A broken upstream package therefore fails the workflow instead of reaching
+deployments, which pull `latest` through the update mechanism above. The dated
+`refresh-*` tags are kept as rollback targets — pin a compose file to one to
+step back to a known-good build.
+
+**Not covered by the refresh:** the orchestrator's npm dependencies are pinned
+by `package-lock.json`, so a rebuild reinstalls the same versions by design.
+Bumping those is a source change (e.g. Dependabot / Renovate on
+`orchestrator/package.json`), not an image rebuild.
+
+**Scheduled workflows are disabled by GitHub after 60 days without repository
+activity** — re-enable from the Actions tab if the weekly run stops firing.
+
 ## Agent Usage Monitoring
 
 Polls agent usage APIs to show each user's remaining capacity in the sidebar. Works for OAuth-authenticated agents (per-user credential files at `<DATA_DIR>/users/<userId>/credentials/{claude,codex,gemini}.json`, or the per-user `CLAUDE_CODE_OAUTH_TOKEN` set in the Account modal). API key auth has no usage endpoints.

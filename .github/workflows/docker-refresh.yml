@@ -1,0 +1,154 @@
+name: Refresh Docker Images
+
+# Weekly cache-free rebuild of both images so unpinned dependencies pick up
+# current versions: the base images (ubuntu:24.04 / node:22-alpine), all apt
+# packages, and the Claude / Codex / Gemini CLIs. Nothing in the repo changes —
+# the same Dockerfiles simply resolve to newer upstream versions.
+#
+# Images are published under a dated tag first, smoke-tested on both
+# architectures, and only then promoted to `latest`/`main`. A broken upstream
+# package therefore fails the run instead of reaching deployments, which pull
+# `latest` through the orchestrator's update mechanism.
+
+on:
+  schedule:
+    # Mondays 04:00 UTC. GitHub disables scheduled runs after 60 days without
+    # repository activity — re-enable from the Actions tab if that happens.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: docker-refresh
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # Resolved once so every job in the run agrees on the tag, even if the run
+  # straddles midnight UTC.
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        run: echo "tag=refresh-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+  orchestrator:
+    needs: setup
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker-image.yml
+    with:
+      image: agentor-orchestrator
+      context: ./orchestrator
+      refresh: true
+      tags: type=raw,value=${{ needs.setup.outputs.tag }}
+
+  worker:
+    needs: setup
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker-image.yml
+    with:
+      image: agentor-worker
+      context: ./worker
+      refresh: true
+      tags: type=raw,value=${{ needs.setup.outputs.tag }}
+
+  verify:
+    needs: [setup, orchestrator, worker]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: read
+    env:
+      TAG: ${{ needs.setup.outputs.tag }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Worker — agent CLIs and tooling respond
+        run: |
+          docker run --rm --entrypoint bash \
+            "$REGISTRY/$OWNER/agentor-worker:$TAG" -c '
+              set -eux
+              claude --version
+              codex --version
+              gemini --version
+              node --version
+              npm --version
+              git --version
+              tmux -V
+              chromium --version
+              code-server --version
+              command -v gh code docker dnsmasq microsocks x11vnc Xvfb /usr/sbin/sshd
+            '
+
+      # Requires the host Docker socket: the orchestrator resolves its storage
+      # mode and reconciles workers through it at startup, and the socket path
+      # is hardcoded so it cannot be redirected at an isolated daemon. Safe on
+      # GitHub-hosted runners (ephemeral, no agentor state). Do NOT move this
+      # job to a self-hosted runner that also hosts an agentor deployment —
+      # booting against its socket with an empty data dir would reconcile that
+      # deployment's Traefik container away.
+      - name: Orchestrator — server bundle boots and reports healthy
+        run: |
+          IMG="$REGISTRY/$OWNER/agentor-orchestrator:$TAG"
+          docker run --rm "$IMG" node --version
+          mkdir -p /tmp/agentor-data
+          docker run -d --name agentor-smoke \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/agentor-data:/data \
+            -p 3000:3000 "$IMG"
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/api/health | grep -q '"status":"ok"'; then
+              echo "orchestrator healthy after ${i}s"
+              docker rm -f agentor-smoke >/dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::orchestrator did not report healthy within 60s"
+          docker logs agentor-smoke
+          docker rm -f agentor-smoke >/dev/null
+          exit 1
+
+  promote:
+    needs: [setup, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Retags the verified manifest — no layers are re-uploaded. The dated
+      # `refresh-*` tag stays behind as a rollback target.
+      - name: Promote verified images to latest
+        env:
+          TAG: ${{ needs.setup.outputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          for name in agentor-orchestrator agentor-worker; do
+            IMAGE="$REGISTRY/$OWNER/$name"
+            docker buildx imagetools create -t "$IMAGE:latest" -t "$IMAGE:main" "$IMAGE:$TAG"
+            echo "$name -> $(docker buildx imagetools inspect "$IMAGE:latest" --format '{{.Manifest.Digest}}')"
+          done
