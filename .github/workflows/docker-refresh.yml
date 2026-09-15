@@ -1,6 +1,6 @@
 name: Refresh Docker Images
 
-# Weekly cache-free rebuild of both images so unpinned dependencies pick up
+# Daily cache-free rebuild of both images so unpinned dependencies pick up
 # current versions: the base images (ubuntu:24.04 / node:22-alpine), all apt
 # packages, and the Claude / Codex / Gemini CLIs. Nothing in the repo changes —
 # the same Dockerfiles simply resolve to newer upstream versions.
@@ -12,9 +12,9 @@ name: Refresh Docker Images
 
 on:
   schedule:
-    # Mondays 04:00 UTC. GitHub disables scheduled runs after 60 days without
+    # Daily 04:00 UTC. GitHub disables scheduled runs after 60 days without
     # repository activity — re-enable from the Actions tab if that happens.
-    - cron: '0 4 * * 1'
+    - cron: '0 4 * * *'
   workflow_dispatch:
 
 concurrency:

@@ -27,7 +27,7 @@ rebuild of the same Dockerfile is what picks up upstream updates. Without a
 scheduled rebuild, `latest` would freeze at whatever was current on the last
 source change.
 
-`.github/workflows/docker-refresh.yml` runs **Mondays 04:00 UTC** and on manual
+`.github/workflows/docker-refresh.yml` runs **daily at 04:00 UTC** and on manual
 dispatch (Actions → Refresh Docker Images → Run workflow):
 
 1. **Rebuild both images cache-free.** Calls the shared
@@ -58,7 +58,7 @@ Bumping those is a source change (e.g. Dependabot / Renovate on
 `orchestrator/package.json`), not an image rebuild.
 
 **Scheduled workflows are disabled by GitHub after 60 days without repository
-activity** — re-enable from the Actions tab if the weekly run stops firing.
+activity** — re-enable from the Actions tab if the daily run stops firing.
 
 ## Agent Usage Monitoring
 
