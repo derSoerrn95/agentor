@@ -7,7 +7,7 @@ defineRouteMeta({
     parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Environment ID' }],
     requestBody: {
       required: true,
-      content: { 'application/json': { schema: { $ref: '#/components/schemas/Environment' } } },
+      content: { 'application/json': { schema: { $ref: '#/components/schemas/EnvironmentInput' } } },
     },
     responses: {
       200: { description: 'Updated environment', content: { 'application/json': { schema: { $ref: '#/components/schemas/Environment' } } } },

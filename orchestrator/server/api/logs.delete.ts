@@ -3,6 +3,7 @@ defineRouteMeta({
     tags: ['Logs'],
     summary: 'Clear all log files',
     operationId: 'clearLogs',
+    'x-admin-only': true,
     responses: {
       200: { description: 'Logs cleared', content: { 'application/json': { schema: { type: 'object', properties: { ok: { type: 'boolean' } } } } } },
     },

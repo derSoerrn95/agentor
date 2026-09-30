@@ -39,6 +39,7 @@ All agents are installed in a single unified worker image. Start any agent via i
 - **Centralized logging** — collects logs from all containers (orchestrator, workers, traefik) with NDJSON storage, log rotation, and a live-streaming log viewer in the dashboard
 - **Theme toggle** — switch between system default, light, and dark mode
 - **API docs** — auto-generated OpenAPI 3.1.0 spec with interactive Scalar UI at `/api/docs`
+- **MCP server** — let an AI agent (Claude Code, Codex, …) drive Agentor over the Model Context Protocol: create and manage workers, run commands, talk to agents in tmux, see and click the virtual desktop, move files, and manage environments, mappings, users and more. Agents sign in with your account via OAuth and are revocable at any time
 
 ---
 
@@ -150,6 +151,18 @@ Open the sidebar footer, click your name, then **Account → API keys & tokens**
 You can also add arbitrary `KEY=value` pairs in **Custom environment variables** — these get exported into every worker you create.
 
 ---
+
+## MCP server (control Agentor from an AI agent)
+
+Agentor serves an MCP server at `<your dashboard URL>/mcp`. Add it to any MCP client that supports remote servers with OAuth — for Claude Code:
+
+```bash
+claude mcp add --transport http agentor https://agentor.example.com/mcp
+```
+
+On first use the client opens a browser window: sign in with your Agentor account and approve the client. It then acts as you, with exactly your permissions (admins additionally get user management and system administration), and learns what Agentor is and how to use it from the server itself. The exact URL is shown under **Account → MCP access**, which also lists the applications you authorized and lets you revoke them.
+
+The MCP URL is your dashboard's public URL plus `/mcp` and must use HTTPS (plain `http://localhost` works for local use). See `.env.example` (`BETTER_AUTH_URL`, `MCP_ENABLED`) to configure it.
 
 ## Storage
 

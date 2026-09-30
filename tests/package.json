@@ -17,6 +17,8 @@
     "test:docker:clean": "docker compose -f ../docker-compose.tests.yml down -v --remove-orphans && docker volume rm agentor-test-runner-docker 2>/dev/null || true"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.2.0",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "@playwright/test": "^1.59.1",
     "@types/node": "^25.6.0",
     "@types/ssh2": "^1.15.5",

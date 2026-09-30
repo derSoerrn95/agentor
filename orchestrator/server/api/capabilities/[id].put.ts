@@ -7,7 +7,7 @@ defineRouteMeta({
     parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Capability ID' }],
     requestBody: {
       required: true,
-      content: { 'application/json': { schema: { $ref: '#/components/schemas/Capability' } } },
+      content: { 'application/json': { schema: { $ref: '#/components/schemas/CapabilityInput' } } },
     },
     responses: {
       200: { description: 'Updated capability', content: { 'application/json': { schema: { $ref: '#/components/schemas/Capability' } } } },

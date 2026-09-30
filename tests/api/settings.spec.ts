@@ -102,6 +102,9 @@ test.describe('Settings API', () => {
     expect(keys).toContain('BETTER_AUTH_URL');
     expect(keys).toContain('BETTER_AUTH_TRUSTED_ORIGINS');
     expect(keys).toContain('BETTER_AUTH_RP_ID');
+    // MCP server status (the OAuth-protected /mcp URL, or why it is disabled).
+    const mcp = section.items.find((i: { key: string }) => i.key === 'MCP_ENABLED');
+    expect(mcp.value).toMatch(/\/mcp$|^disabled/);
     // The session secret is sensitive and exposed only as a status value.
     const secret = section.items.find((i: { key: string }) => i.key === 'BETTER_AUTH_SECRET');
     expect(secret.type).toBe('status');

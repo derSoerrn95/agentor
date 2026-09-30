@@ -19,15 +19,23 @@
 - `orchestrator/.npmrc` - `legacy-peer-deps=true` (better-auth 1.7's optional framework peers otherwise break npm's resolver)
 - `orchestrator/nuxt.config.ts` - Nuxt configuration (modules, SPA mode, Nitro WebSocket)
 - `orchestrator/server/plugins/services.ts` - Nitro startup: init Auth (better-auth + migrations) + Logger + LogStore + LogBroadcaster + LogCollector + Docker + ContainerManager + PortMappingStore + DomainMappingStore + TraefikManager + EnvironmentStore + CapabilityStore + InstructionStore + InitScriptStore + WorkerStore + UpdateChecker + UsageChecker
-- `orchestrator/server/utils/config.ts` - Environment variable parsing (includes `betterAuthSecret`)
-- `orchestrator/server/utils/auth.ts` - better-auth singleton + admin plugin + @better-auth/passkey plugin; exports `useAuth()`, `migrateAuth()`, `hasAnyUsers()`, `setUserRoleDirect()`, `getCredentialSummary()`, `removeUserPassword()`. Implements `resolveUser()` for passkey-first registration via the setup-token store.
+- `orchestrator/server/utils/config.ts` - Environment variable parsing (includes `betterAuthSecret`, the resolved `publicBaseUrl`, `mcpEnabled`)
+- `orchestrator/server/utils/auth.ts` - better-auth singleton + admin plugin + @better-auth/passkey plugin + jwt / @better-auth/mcp / @better-auth/cimd (OAuth 2.1 provider for MCP clients); exports `useAuth()`, `migrateAuth()`, `hasAnyUsers()`, `setUserRoleDirect()`, `getCredentialSummary()`, `removeUserPassword()`, `getMcpAuthConfig()`, `MCP_PATH`, `MCP_SCOPE`. Implements `resolveUser()` for passkey-first registration via the setup-token store.
 - `orchestrator/server/utils/setup-token-store.ts` - In-memory 5-minute one-shot tokens used as opaque `context` for passkey-first registration when no session exists. Consumed by `/api/setup/create-admin-passkey-token` and the `resolveUser` callback.
-- `orchestrator/server/utils/auth-helpers.ts` - `requireAuth`, `requireAdmin`, `requireContainerAccess`, `requireRunningContainerAccess`, `canAccessResource`, `authenticateWsPeer`
+- `orchestrator/server/utils/auth-helpers.ts` - `requireAuth`, `requireAdmin`, `requireContainerAccess`, `requireRunningContainerAccess`, `canAccessResource`, `authenticateWsPeer`; `resolveAuthFromEvent` also redeems MCP internal auth capabilities
 - `orchestrator/server/middleware/auth.ts` - Global Nitro middleware enforcing auth on `/api/*` (skips auth/setup/health/docs/worker-self)
 - `orchestrator/server/utils/worker-auth.ts` - `requireWorkerSelf(event)` — identifies the calling worker by source IP on the agentor-net Docker network (no session needed). Used by every `/api/worker-self/*` route.
+- `orchestrator/server/routes/mcp.ts` - MCP endpoint (Streamable HTTP, OAuth-protected); canonicalizes the request URL to the public resource URL
+- `orchestrator/server/routes/.well-known/[...path].ts` - Root OAuth discovery documents (protected-resource + authorization-server metadata) forwarded to better-auth
+- `orchestrator/server/utils/mcp-server.ts` - `useMcpRequestHandler()`: `requireMcpAuth` + SDK `createMcpHandler`, per-request `McpServer` (instructions, `agentor://guide` resource, tools bound to the user), token → user + consent resolution
+- `orchestrator/server/utils/mcp-tools.ts` - OpenAPI → MCP tool bridge (`mcp-from-openapi`): generation, `x-mcp` / `x-admin-only` handling, execution over loopback HTTP, response → MCP content mapping
+- `orchestrator/server/utils/internal-auth.ts` - Single-use internal auth capabilities (`x-agentor-internal-auth`) for MCP tool calls re-dispatched to REST routes
+- `orchestrator/server/utils/oauth-apps.ts` - A user's authorized OAuth applications (consents), revocation (consent + tokens), consent gate for `/mcp`
 - `orchestrator/server/utils/user-admin.ts` - User management on better-auth's server API / internal adapter (`/api/users`, `/api/account/me|profile`)
+- `orchestrator/server/mcp/instructions.md` - Agent-facing Agentor guide: MCP server `instructions` + `agentor://guide` resource (server asset `mcp`)
 - `orchestrator/server/api/users/*.ts` - Admin user management (`index.get`, `index.post`, `[id].patch`, `[id].delete`, `[id]/password.put`)
 - `orchestrator/server/api/account/me.get.ts` + `profile.patch.ts` - Current user; self-service name/email update
+- `orchestrator/server/api/account/oauth-apps/*.ts` - Authorized OAuth applications (`index.get`, `[clientId].delete` revoke)
 - `orchestrator/server/api/containers/[id]/exec.post.ts` - Run a command in a worker (bash as `agent`, timeout, capped stdout/stderr)
 - `orchestrator/server/api/containers/[id]/panes/[windowIndex]/keys.post.ts` + `capture.get.ts` - tmux send-keys / capture-pane
 - `orchestrator/server/api/containers/[id]/desktop/screenshot.get.ts` + `input.post.ts` - Virtual desktop PNG screenshot (maim) and mouse / keyboard input (xdotool)
@@ -109,13 +117,15 @@
 - `orchestrator/app/assets/css/main.css` - CSS custom properties for theming (--pane-tab-*, --terminal-*, --scrollbar-*) + dark/light mode overrides
 - `orchestrator/app/app.vue` - Nuxt app root component
 - `orchestrator/app/pages/index.vue` - Dashboard page (sidebar + split pane layout + modals)
-- `orchestrator/app/pages/login.vue` - Sign-in form (email/password, redirects to `/` on success)
+- `orchestrator/app/pages/login.vue` - Sign-in form (email/password + passkey; redirects to `/`, or continues an OAuth authorization)
+- `orchestrator/app/pages/oauth/consent.vue` - OAuth consent screen for MCP clients
 - `orchestrator/app/pages/setup.vue` - First-run admin creation form (redirects to `/login` when setup is complete)
 - `orchestrator/app/middleware/auth.global.ts` - Global client route guard (redirects to `/setup` or `/login` as needed)
-- `orchestrator/app/composables/useAuth.ts` - better-auth Vue client wrapper (session, user, isAdmin, signIn, signOut, admin plugin)
+- `orchestrator/app/composables/useAuth.ts` - better-auth Vue client wrapper (session, user, isAdmin, signIn, signOut, admin + passkey + oauth-provider client plugins; `isOAuthAuthorizationPage()`, `followOAuthRedirect()`)
 - `orchestrator/app/plugins/xterm.client.ts` - Provides `$Terminal` and `$FitAddon` globally (avoids SSR import issues)
 - `orchestrator/app/components/AppSidebar.vue` - Left sidebar (container list, archived workers, port mappings, domain mappings, usage panel, update notification, **signed-in user card + sign out + Users modal trigger for admins**)
 - `orchestrator/app/components/UsersModal.vue` - Admin-only user management (list, create, change role, reset password, delete) via `/api/users`
+- `orchestrator/app/components/McpAccessSection.vue` - Account modal section: MCP server URL + setup command, authorized OAuth applications with Revoke
 - `orchestrator/app/components/AccountModal.vue` - Self-service account modal: profile (name + email), password (change/set/remove with two-step confirm), passkeys (list/add/remove with two-step confirm). Backed by `client.passkey.*`, `client.changePassword`, `client.changeEmail`, `client.updateUser` and Agentor's custom `/api/account/*` endpoints.
 - `orchestrator/app/components/AppInstanceRow.vue` - Single app row in AppsPane
 - `orchestrator/app/components/AppsPane.vue` - App instances for a container
@@ -203,7 +213,8 @@
 - `tests/helpers/ui-helpers.ts` - Page navigation and interaction helpers
 - `tests/helpers/test-users.ts` - Create/sign-in/delete test users via the admin API (used by passkey + authorization tests)
 - `tests/helpers/webauthn.ts` - Install/dispose Chrome DevTools virtual WebAuthn authenticator for end-to-end passkey tests (`installVirtualAuthenticator(page)`)
-- `tests/api/*.spec.ts` - API integration tests (62 files; incl. worker-metrics, worker-export-import, github-repos, worker-exec, tmux-io, desktop-control, users)
-- `tests/ui/*.spec.ts` - UI integration tests (43 files; incl. worker-card-actions, import-worker-modal, github-autocomplete-refresh)
+- `tests/helpers/mcp.ts` - MCP test client: full OAuth flow through the MCP SDK (`connectMcp`), hand-driven OAuth steps (`registerPublicClient`, `authorizationRequest`, `approveAuthorization`, `obtainTokens`, `requestTokens`), tool-call helpers (`callJson`, `callError`)
+- `tests/api/*.spec.ts` - API integration tests (65 files; incl. worker-metrics, worker-export-import, github-repos, mcp-oauth, mcp-tools, mcp-platform, worker-exec, tmux-io, desktop-control, users)
+- `tests/ui/*.spec.ts` - UI integration tests (45 files; incl. worker-card-actions, import-worker-modal, github-autocomplete-refresh, mcp-oauth)
 - `tests/FEATURES.md` - Feature inventory driving test coverage
 - `tests/TESTS.md` - Test suite documentation with counts per file

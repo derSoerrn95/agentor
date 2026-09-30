@@ -1,6 +1,6 @@
 # Agent Orchestrator (Agentor)
 
-Docker orchestrator that spawns isolated AI coding agent workers, each in its own container with terminal access via a web dashboard. All agent CLIs (Claude, Codex, Gemini) are pre-installed in a single unified worker image. Includes a modular app system (Chromium, SOCKS5 proxy, VS Code Tunnel, SSH server), a unified Traefik reverse proxy for both TCP port mappings and HTTP/HTTPS/TCP domain routing, a VS Code editor (code-server), live per-worker resource monitoring (CPU/RAM/disk/network via the Docker API), worker export/import (portable `.tar` bundles incl. an optional `docker export` of the filesystem), and an automatic update mechanism for production deployments.
+Docker orchestrator that spawns isolated AI coding agent workers, each in its own container with terminal access via a web dashboard. All agent CLIs (Claude, Codex, Gemini) are pre-installed in a single unified worker image. Includes a modular app system (Chromium, SOCKS5 proxy, VS Code Tunnel, SSH server), a unified Traefik reverse proxy for both TCP port mappings and HTTP/HTTPS/TCP domain routing, a VS Code editor (code-server), live per-worker resource monitoring (CPU/RAM/disk/network via the Docker API), worker export/import (portable `.tar` bundles incl. an optional `docker export` of the filesystem), an OAuth-protected **MCP server** (`/mcp`) whose tools are generated from the REST API's OpenAPI spec so an AI agent can control the whole platform, and an automatic update mechanism for production deployments.
 
 ## Architecture
 
@@ -14,6 +14,8 @@ Local VS Code            <--tunnel-----> Microsoft Relay              <--tunnel-
 Local ssh client         <--TCP--------> Traefik (ext :22xxx)         <--TCP-----------> Worker (ssh app → sshd :22)
 Orchestrator             <--docker exec-> apps/*/manage.sh (start/stop/list app instances in worker)
 Orchestrator (TraefikManager) <--dockerode--> Traefik container (unified reverse proxy: port mappings + domain routing, TLS)
+MCP client (AI agent)    <--OAuth 2.1----> better-auth (@better-auth/mcp: /api/auth/oauth2/*, /.well-known/*)
+MCP client (AI agent)    <--HTTP /mcp----> MCP server (SDK v2) --loopback HTTP--> REST routes (tools generated from OpenAPI)
 ```
 
 Three managed containers:
@@ -36,7 +38,8 @@ Three managed containers:
 | API | @docs/api.md | API documentation (OpenAPI), adding docs to routes |
 | Key Files | @docs/key-files.md | Complete file listing (server, client, worker, tests) |
 | Testing | @docs/testing.md | Running tests, writing tests, conventions, maintaining FEATURES.md and TESTS.md |
-| Authentication | @docs/authentication.md | better-auth integration, users, roles, resource ownership |
+| Authentication | @docs/authentication.md | better-auth integration, users, roles, resource ownership, OAuth provider |
+| MCP Server | @docs/mcp.md | MCP endpoint, OAuth for MCP clients, OpenAPI → tool generation, execution via the REST routes, extending |
 | Feature Inventory | @tests/FEATURES.md | Canonical list of all user-facing features, drives test coverage |
 | Test Suite Index | @tests/TESTS.md | Test counts, structure, and design decisions |
 
@@ -45,7 +48,8 @@ Three managed containers:
 - Framework: Nuxt 3 (SPA mode), Nitro server, Vue 3
 - UI: Nuxt UI v3, Tailwind CSS v4
 - Terminal: xterm.js 5 (@xterm/xterm + @xterm/addon-fit)
-- Auth: better-auth 1.7 + admin plugin (user management, RBAC) + @better-auth/passkey (WebAuthn passwordless), better-sqlite3 (SQLite database for users/sessions/passkeys)
+- Auth: better-auth 1.7 + admin plugin (user management, RBAC) + @better-auth/passkey (WebAuthn passwordless) + jwt + @better-auth/mcp (OAuth 2.1 provider for MCP clients) + @better-auth/cimd (client metadata documents), better-sqlite3 (SQLite database for users/sessions/passkeys/OAuth clients)
+- MCP: @modelcontextprotocol/server 2 (stateless Streamable HTTP, 2025 + 2026-07-28 protocol eras), mcp-from-openapi (OpenAPI → MCP tool definitions + request building)
 - Backend: dockerode 4, nanoid 5, crossws (WebSocket, bundled with Nitro), ws (WebSocket client for noVNC proxy), tar-stream (archive packing)
 - Workers: Ubuntu 24.04, agent CLI (varies), tmux, git, Docker CE (opt-in DinD), Xvfb, fluxbox, x11vnc, noVNC (port 6080), code-server (port 8443), VS Code CLI (tunnel), Chromium, microsocks, dnsmasq, ipset, iptables
 
@@ -110,7 +114,9 @@ See @docs/testing.md for full details (writing tests, conventions, helpers, debu
 
 ## Gotchas
 
+- **Every documented REST route is an MCP tool** — `defineRouteMeta` with an `operationId` is picked up by the OpenAPI → MCP bridge automatically. Write route descriptions for an agent reader; mark admin-only routes `'x-admin-only': true` (in addition to `requireAdmin`); opt a route out with `'x-mcp': false`. See @docs/mcp.md
 - **`orchestrator/.npmrc` sets `legacy-peer-deps=true`** — better-auth 1.7 lists framework integrations (e.g. `@sveltejs/kit`) as optional peers and npm's resolver wrongly turns their vite 8 peer into a conflict with Nuxt's vite 7. The Dockerfile copies `.npmrc` before `npm ci`
+- **OAuth issuer / MCP resource = the public URL** (`config.publicBaseUrl`, resolved in `config.ts`; see `.env.example`). MCP clients must reach the orchestrator under exactly that URL; MCP turns itself off when it is plain http on a non-loopback host
 - **crossws `peer.ctx` is undefined** in Nitro's bundled crossws — store per-connection state in a `Map<string, Context>` keyed by `peer.id`, not on `peer.ctx`
 - **crossws `close` event does not fire reliably** in Nitro's dev mode — detect disconnected peers via `peer.send()` failure in the data handler instead of relying on the `close` callback
 - **Iframes and xterm steal mouse events** during split pane / tab drag — apply `pointer-events: none` via a body class (`body.tab-dragging iframe, body.tab-dragging .xterm`)

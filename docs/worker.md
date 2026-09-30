@@ -19,7 +19,7 @@ Individual env vars that CLIs read directly are populated **from the worker owne
 The unified worker image (`worker/`) provides:
 - Ubuntu 24.04, Node.js 22 LTS, git, tmux, curl, build-essential, python3, ripgrep, fd-find, jq, sudo, locale
 - Display stack: Xvfb, fluxbox, x11vnc, noVNC/websockify (port 6080)
-- Desktop automation: maim (PNG screenshots) + xdotool (mouse / keyboard) — used by the orchestrator's `desktop/screenshot` and `desktop/input` API through `docker exec` on `DISPLAY=:99`
+- Desktop automation: maim (PNG screenshots) + xdotool (mouse / keyboard) — used by the orchestrator's `desktop/screenshot` and `desktop/input` API (and the matching MCP tools) through `docker exec` on `DISPLAY=:99`
 - Code editor: code-server (VS Code in browser, port 8443)
 - Browsers: Chromium (from Debian bookworm repo), Playwright (with bundled Chromium + Firefox)
 - microsocks (SOCKS5 proxy)

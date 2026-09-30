@@ -44,6 +44,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
   }
 
   if (!isLoggedIn.value) {
+    // Carry an OAuth authorization's signed query over to the login page, so
+    // signing in resumes the authorization instead of opening the dashboard.
+    if (to.path === '/oauth/consent') return navigateTo({ path: '/login', query: to.query });
     return navigateTo('/login');
   }
 });

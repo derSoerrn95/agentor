@@ -4,7 +4,7 @@ import { useOrphanSweeper } from './services';
 
 /**
  * User management on top of better-auth, for the `/api/users` and
- * `/api/account` REST routes. better-auth's admin plugin
+ * `/api/account` REST routes (and thereby MCP). better-auth's admin plugin
  * endpoints only accept a browser session, so these call its server API /
  * internal adapter directly with the same rules the admin plugin applies;
  * callers authorize (`requireAdmin`) first.

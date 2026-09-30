@@ -748,6 +748,8 @@ async function handleDeletePasskey(p: PasskeyRow) {
           <p v-if="credResetError" class="text-sm text-red-600 dark:text-red-400">{{ credResetError }}</p>
           <p v-if="credResetSuccess" class="text-sm text-emerald-600 dark:text-emerald-400">{{ credResetSuccess }}</p>
         </section>
+
+        <McpAccessSection :active="open" />
       </div>
     </template>
   </UModal>

@@ -1,12 +1,12 @@
 # Authentication & Authorization
 
-Agentor uses [better-auth](https://www.better-auth.com/) with its admin plugin for email/password authentication and role-based access control. All API endpoints and WebSocket connections are protected by default — only `/api/health`, `/api/setup/**`, `/api/auth/**`, and `/api/docs` are public.
+Agentor uses [better-auth](https://www.better-auth.com/) with its admin plugin for email/password authentication and role-based access control, and as an OAuth 2.1 authorization server for MCP clients (see **OAuth 2.1 Provider (MCP clients)** below and @docs/mcp.md). All API endpoints and WebSocket connections are protected by default — only `/api/health`, `/api/setup/**`, `/api/auth/**`, `/api/docs`, and the root OAuth discovery documents under `/.well-known/` are public; `/mcp` authenticates with OAuth access tokens.
 
 ## First-Run Setup
 
 On a fresh install, the SQLite auth database is empty. Navigating to any page redirects to `/setup`, where the first user is created and automatically promoted to `admin`. This is the only way to create the initial admin — the `create-admin` endpoint is disabled once any user exists (returns 409).
 
-After the initial admin, additional users (with `user` or `admin` role) can be created by an existing admin via the Users modal in the sidebar, backed by the `/api/users` REST API.
+After the initial admin, additional users (with `user` or `admin` role) can be created by an existing admin via the Users modal in the sidebar (or the `create_user` MCP tool), both backed by the `/api/users` REST API.
 
 ## Roles
 
@@ -44,7 +44,7 @@ A background orphan sweeper (`server/utils/orphan-sweeper.ts`) runs at startup a
 
 ### Database
 
-better-auth stores users, sessions, accounts, and verification tokens in `<DATA_DIR>/auth.db` (SQLite). Migrations run automatically on startup via `getMigrations()`.
+better-auth stores users, sessions, accounts, verification tokens, passkeys, and the OAuth provider's tables (`oauthClient`, `oauthConsent`, `oauthAccessToken`, `oauthRefreshToken`, `jwks`, …) in `<DATA_DIR>/auth.db` (SQLite). Migrations run automatically on startup via `getMigrations()`.
 
 Application data remains in JSON files (via `JsonStore`) — we only use SQLite for auth. This keeps the unit of persistence (a single file per store) unchanged.
 
@@ -52,11 +52,13 @@ Application data remains in JSON files (via `JsonStore`) — we only use SQLite 
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Auth instance | `orchestrator/server/utils/auth.ts` | `betterAuth()` configuration with admin plugin, session config, and migration runner |
+| Auth instance | `orchestrator/server/utils/auth.ts` | `betterAuth()` configuration with admin, passkey, jwt, mcp and cimd plugins, session config, migration runner, `resolveMcpConfig()` |
 | Auth handler | `orchestrator/server/api/auth/[...all].ts` | Catch-all that forwards `/api/auth/*` to `auth.handler()` |
-| Middleware | `orchestrator/server/middleware/auth.ts` | Global Nitro middleware that extracts the session on every `/api/*` request, enforces a trusted `Origin` on cookie-authenticated mutations (CSRF), and populates `event.context.auth`. Skips `/api/auth/**`, `/api/health`, `/api/setup/**`, `/api/docs`, and `/api/worker-self/**`. |
+| Middleware | `orchestrator/server/middleware/auth.ts` | Global Nitro middleware that resolves the caller on every `/api/*` request (browser session, or an MCP tool call's internal capability), enforces a trusted `Origin` on cookie-authenticated mutations (CSRF), and populates `event.context.auth`. Skips `/api/auth/**`, `/api/health`, `/api/setup/**`, `/api/docs`, and `/api/worker-self/**`. |
 | Helpers | `orchestrator/server/utils/auth-helpers.ts` | `requireAuth(event)`, `requireAdmin(event)`, `requireContainerAccess(event, container)`, `requireRunningContainerAccess(...)`, `canAccessResource(...)`, `authenticateWsPeer(peer)` |
+| Internal auth | `orchestrator/server/utils/internal-auth.ts` | Single-use, 60 s internal capabilities (`x-agentor-internal-auth`) with which MCP tool calls re-dispatch to REST routes (over loopback) as the MCP caller |
 | User admin | `orchestrator/server/utils/user-admin.ts` | `/api/users` + `/api/account` logic on better-auth's server API / internal adapter (list, create, update name/email/role, set password, delete + immediate orphan sweep) |
+| OAuth apps | `orchestrator/server/utils/oauth-apps.ts` | A user's authorized OAuth applications (consents) and their revocation |
 | Worker auth | `orchestrator/server/utils/worker-auth.ts` | `requireWorkerSelf(event)` — identifies the calling worker by source IP on the `agentor-net` Docker bridge network. Used by every `/api/worker-self/*` route in place of session auth. |
 | Setup endpoints | `orchestrator/server/api/setup/status.get.ts` + `create-admin.post.ts` | First-run detection and initial admin creation |
 
@@ -79,12 +81,23 @@ Applied to:
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Auth composable | `orchestrator/app/composables/useAuth.ts` | Wraps `createAuthClient` from `better-auth/vue` + `adminClient()`; exposes `session`, `user`, `isLoggedIn`, `isAdmin`, `signIn`, `signOut`, `client` |
+| Auth composable | `orchestrator/app/composables/useAuth.ts` | Wraps `createAuthClient` from `better-auth/vue` + `adminClient()` + `passkeyClient()` + `oauthProviderClient()`; exposes `session`, `user`, `isLoggedIn`, `isAdmin`, `signIn`, `signOut`, `client`, plus `isOAuthAuthorizationPage()` / `followOAuthRedirect()` |
 | Route guard | `orchestrator/app/middleware/auth.global.ts` | Global Nuxt route middleware — redirects to `/setup` on first run, `/login` when no session |
-| Login page | `orchestrator/app/pages/login.vue` | Email/password form; calls `client.signIn.email()` and redirects to `/` |
+| Login page | `orchestrator/app/pages/login.vue` | Email/password + passkey sign-in; redirects to `/`, or — when reached from an OAuth authorization (signed `sig` query) — follows better-auth's `{ redirect, url }` to continue it |
+| Consent page | `orchestrator/app/pages/oauth/consent.vue` | OAuth consent screen for MCP clients (client name, scopes, Approve / Deny) |
 | Setup page | `orchestrator/app/pages/setup.vue` | Initial admin creation form; calls `POST /api/setup/create-admin` then signs in |
 | Users modal | `orchestrator/app/components/UsersModal.vue` | Admin-only user management — list, create, change role, reset password, delete — via the `/api/users` REST API |
 | Sidebar footer | `orchestrator/app/components/AppSidebar.vue` | Account info + sign out button pinned to the bottom of the sidebar (always visible, outside the tab content) |
+
+## OAuth 2.1 Provider (MCP clients)
+
+better-auth also acts as the OAuth 2.1 authorization server for MCP clients (AI agents such as Claude Code) — `jwt()` + `mcp()` from `@better-auth/mcp` + `cimd()` from `@better-auth/cimd`, enabled unless `MCP_ENABLED=false` or the public URL is plain http on a non-loopback host. Details in @docs/mcp.md; the essentials:
+
+- **Endpoints**: `/api/auth/oauth2/{authorize,token,register,consent,userinfo,…}`, AS metadata at `/.well-known/oauth-authorization-server/api/auth`, protected-resource metadata at `/.well-known/oauth-protected-resource/mcp`, JWKS at `/api/auth/jwks`.
+- **Clients** register dynamically (DCR, public + PKCE) or via Client ID Metadata Documents. Users approve them on `/oauth/consent`; signing in from an authorization redirect continues it automatically.
+- **Access tokens** are JWTs bound to `<public URL>/mcp` with scope `agentor` (full access as the user). They authenticate `/mcp` only — never the REST API directly. The MCP endpoint re-checks the user (exists, not banned) and the user's consent for the client on every request.
+- **Revocation**: Account modal → MCP access → Revoke, or `DELETE /api/account/oauth-apps/:clientId` — deletes the consent and the client's refresh / access tokens; the MCP endpoint rejects the client immediately.
+- **REST access for MCP tool calls**: tools re-dispatch to REST routes over loopback HTTP with a single-use internal capability (`internal-auth.ts`), so `event.context.auth` is the MCP caller and all existing ownership / role checks apply unchanged. Routes needing a real browser session (better-auth's own `/api/auth/*` account endpoints, `set-password`) are excluded from MCP.
 
 ## Admin-only Endpoints
 
@@ -92,7 +105,7 @@ Applied to:
 - `GET/DELETE /api/logs` — log query + clear
 - `POST /api/updates/apply`, `/check`, `/prune` — image updates
 - `/api/users/**` — user management (list, create, update name/email/role, set password, delete). An admin cannot demote or delete themselves.
-- `POST /api/auth/admin/*` — better-auth's own admin plugin endpoints (session-only; the dashboard uses `/api/users`)
+- `POST /api/auth/admin/*` — better-auth's own admin plugin endpoints (session-only; the dashboard and MCP use `/api/users`)
 - `WS /ws/logs` — live log stream
 
 All other authenticated endpoints are accessible to both admins and regular users (subject to resource ownership).
@@ -161,7 +174,7 @@ The `TerminalWsClient` helper reads cookies from `tests/.auth/admin-api.json` an
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BETTER_AUTH_SECRET` | auto-generated | Session signing secret. If empty, a random 32-byte hex is generated and written to `<DATA_DIR>/auth.secret` on first run. |
-| `BETTER_AUTH_URL` | `http://localhost:3000` | Base URL used by better-auth for cookie domain and default trusted origin. Override for production deployments. |
+| `BETTER_AUTH_URL` | dashboard URL, else `http://localhost:3000` | Public base URL: better-auth's `baseURL`, the OAuth issuer origin and the MCP resource origin. See `.env.example`. |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | — | Extra comma-separated origins to accept on auth mutations' `Origin` header. `localhost:3000`, `127.0.0.1:3000`, `BETTER_AUTH_URL`, and the dashboard subdomain (`DASHBOARD_SUBDOMAIN.DASHBOARD_BASE_DOMAIN`, both http and https) are always trusted automatically. |
 | `BETTER_AUTH_RP_ID` | `${DASHBOARD_SUBDOMAIN}.${DASHBOARD_BASE_DOMAIN}` | WebAuthn Relying Party ID for passkeys. Only relevant when passkeys are enabled (i.e., when the dashboard is served over Traefik). Override to use a parent domain so one passkey works across multiple subdomains. |
 
@@ -246,10 +259,10 @@ Tests live in `tests/ui/passkey-management.spec.ts` and `tests/api/passkey.spec.
 
 ## Trusted Origins & CSRF
 
-better-auth rejects any POST to `/api/auth/*` without an `Origin` or `Referer` header, and rejects requests whose origin isn't in `trustedOrigins` — this is its CSRF protection. Agentor's global `/api` middleware (`server/middleware/auth.ts`) applies the same rule to every other cookie-authenticated, state-changing request (not GET/HEAD/OPTIONS): the `Origin` header must be present and pass `isTrustedOrigin`, otherwise 403. The session cookie is SameSite=Lax, which does not stop same-site pages — such as a worker's domain mapping served on the dashboard's base domain — from posting forms. The trusted list is built automatically on startup:
+better-auth rejects any POST to `/api/auth/*` without an `Origin` or `Referer` header, and rejects requests whose origin isn't in `trustedOrigins` — this is its CSRF protection. Agentor's global `/api` middleware (`server/middleware/auth.ts`) applies the same rule to every other cookie-authenticated, state-changing request (not GET/HEAD/OPTIONS): the `Origin` header must be present and pass `isTrustedOrigin`, otherwise 403. The session cookie is SameSite=Lax, which does not stop same-site pages — such as a worker's domain mapping served on the dashboard's base domain — from posting forms; requests authenticated by an internal capability (MCP tool calls) carry no cookie and are exempt. The trusted list is built automatically on startup:
 
 1. `http://localhost:3000` + `http://127.0.0.1:3000` (direct dev access)
-2. `BETTER_AUTH_URL` if set
+2. The public base URL (`BETTER_AUTH_URL`, else the dashboard URL)
 3. `http(s)://<DASHBOARD_SUBDOMAIN>.<DASHBOARD_BASE_DOMAIN>` when configured via Traefik
 4. Anything listed in `BETTER_AUTH_TRUSTED_ORIGINS` (comma-separated)
 

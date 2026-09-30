@@ -1340,7 +1340,7 @@ export class ContainerManager {
 
   // --- Programmatic access (exec, tmux I/O, desktop) ---
   // The same interactions a human has through the terminal and desktop panes,
-  // as request/response calls (used by the REST API).
+  // as request/response calls (used by the REST API and thereby MCP).
 
   /** Run a bash command in the worker as the `agent` user. Not a login shell:
    * `~/.bash_logout` would print terminal escapes into stdout on `exit`, and the

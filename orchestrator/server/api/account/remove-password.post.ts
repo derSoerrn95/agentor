@@ -4,6 +4,8 @@ defineRouteMeta({
     summary: 'Remove the current user\'s password',
     description: 'Deletes the password credential for the authenticated user. Refused if the user has no passkeys (would leave them with no way to sign in).',
     operationId: 'removeOwnPassword',
+    // Credential management stays with the signed-in human (lockout risk).
+    'x-mcp': false,
     responses: {
       200: { description: 'Password removed' },
       400: { description: 'No password to remove' },

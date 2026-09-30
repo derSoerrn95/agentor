@@ -40,6 +40,12 @@ export interface Config {
   betterAuthUrl: string;
   betterAuthTrustedOrigins: string[];
   betterAuthRpId: string;
+  /** Canonical public URL of the dashboard: `BETTER_AUTH_URL`, else the Traefik
+   * dashboard URL, else `http://localhost:3000`. It is better-auth's `baseURL`,
+   * so it is also the OAuth issuer and the origin of the MCP resource URL —
+   * MCP clients must reach the orchestrator under exactly this URL. */
+  publicBaseUrl: string;
+  mcpEnabled: boolean;
 }
 
 const DEFAULT_LOG_MAX_SIZE = 50 * 1024 * 1024;
@@ -107,6 +113,23 @@ function parseDnsProviderConfigs(baseDomainConfigs: BaseDomainConfig[]): Record<
   return configs;
 }
 
+/** See `Config.publicBaseUrl`. The dashboard URL uses https unless its base
+ * domain is configured without TLS (challenge type `none`). */
+function resolvePublicBaseUrl(
+  betterAuthUrl: string,
+  dashboardSubdomain: string,
+  dashboardBaseDomain: string,
+  baseDomainConfigs: BaseDomainConfig[],
+): string {
+  if (betterAuthUrl) return betterAuthUrl.replace(/\/+$/, '');
+  if (dashboardSubdomain && dashboardBaseDomain) {
+    const challenge = baseDomainConfigs.find((c) => c.domain === dashboardBaseDomain)?.challengeType;
+    const scheme = challenge === 'none' ? 'http' : 'https';
+    return `${scheme}://${dashboardSubdomain}.${dashboardBaseDomain}`;
+  }
+  return 'http://localhost:3000';
+}
+
 export function loadConfig(): Config {
   const pmDomainsEnv = process.env.PACKAGE_MANAGER_DOMAINS?.trim();
 
@@ -118,6 +141,9 @@ export function loadConfig(): Config {
   const dashboardBaseDomain = dashboardBaseDomainEnv && baseDomains.includes(dashboardBaseDomainEnv)
     ? dashboardBaseDomainEnv
     : baseDomains[0] || '';
+
+  const betterAuthUrl = process.env.BETTER_AUTH_URL?.trim() || '';
+  const dashboardSubdomain = process.env.DASHBOARD_SUBDOMAIN || '';
 
   return {
     dockerNetwork: process.env.DOCKER_NETWORK || 'agentor-net',
@@ -136,7 +162,7 @@ export function loadConfig(): Config {
     baseDomainConfigs,
     dnsProviderConfigs,
     dashboardBaseDomain,
-    dashboardSubdomain: process.env.DASHBOARD_SUBDOMAIN || '',
+    dashboardSubdomain,
     acmeEmail: process.env.ACME_EMAIL || '',
     traefikImage: process.env.TRAEFIK_IMAGE || 'traefik:v3',
     dashboardAuthUser: process.env.DASHBOARD_AUTH_USER || '',
@@ -145,10 +171,12 @@ export function loadConfig(): Config {
     logMaxSize: parseLogSize(process.env.LOG_MAX_SIZE || '50m'),
     logMaxFiles: parseInt(process.env.LOG_MAX_FILES || '5', 10) || 5,
     betterAuthSecret: process.env.BETTER_AUTH_SECRET || '',
-    betterAuthUrl: process.env.BETTER_AUTH_URL || '',
+    betterAuthUrl,
     betterAuthTrustedOrigins: process.env.BETTER_AUTH_TRUSTED_ORIGINS
       ? process.env.BETTER_AUTH_TRUSTED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
       : [],
     betterAuthRpId: process.env.BETTER_AUTH_RP_ID?.trim() || '',
+    publicBaseUrl: resolvePublicBaseUrl(betterAuthUrl, dashboardSubdomain, dashboardBaseDomain, baseDomainConfigs),
+    mcpEnabled: (process.env.MCP_ENABLED ?? 'true').trim().toLowerCase() !== 'false',
   };
 }

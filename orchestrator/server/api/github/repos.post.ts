@@ -3,7 +3,7 @@ defineRouteMeta({
     tags: ['GitHub'],
     summary: 'Create GitHub repo',
     description: 'Creates a new GitHub repository on behalf of the current user. Uses the caller\'s per-user GitHub token from Account settings.',
-    operationId: 'createGitHubRepo',
+    operationId: 'createGithubRepo',
     requestBody: {
       required: true,
       content: {

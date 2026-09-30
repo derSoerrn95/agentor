@@ -4,6 +4,7 @@ defineRouteMeta({
     summary: 'Apply updates',
     description: 'Pulls updated images and recreates affected containers. Optionally targets specific images.',
     operationId: 'applyUpdates',
+    'x-admin-only': true,
     requestBody: {
       content: {
         'application/json': {

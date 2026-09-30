@@ -52,6 +52,7 @@ export default defineNuxtConfig({
       { baseName: 'builtin-instructions', dir: './built-in/instructions' },
       { baseName: 'builtin-init-scripts', dir: './built-in/init-scripts' },
       { baseName: 'builtin-environments', dir: './built-in/environments' },
+      { baseName: 'mcp', dir: './mcp' },
     ],
   },
 

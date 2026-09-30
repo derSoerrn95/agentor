@@ -7,7 +7,7 @@ defineRouteMeta({
     parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Instruction ID' }],
     requestBody: {
       required: true,
-      content: { 'application/json': { schema: { $ref: '#/components/schemas/Instruction' } } },
+      content: { 'application/json': { schema: { $ref: '#/components/schemas/InstructionInput' } } },
     },
     responses: {
       200: { description: 'Updated instruction', content: { 'application/json': { schema: { $ref: '#/components/schemas/Instruction' } } } },

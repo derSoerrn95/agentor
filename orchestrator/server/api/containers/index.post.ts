@@ -2,7 +2,7 @@ defineRouteMeta({
   openAPI: {
     tags: ['Containers'],
     summary: 'Create container',
-    description: 'Creates a new worker container with the given configuration.',
+    description: 'Creates and starts a new worker: an isolated Ubuntu container with the Claude Code, Codex and Gemini CLIs, a persistent /workspace, a tmux session, a virtual desktop and VS Code. Returns once the container runs — setup (repo cloning, environment setup script) then continues inside, and the init script finally starts in tmux window 0. The returned `id` (a UUID) identifies the worker in every other worker operation.',
     operationId: 'createContainer',
     requestBody: {
       required: true,
@@ -14,8 +14,8 @@ defineRouteMeta({
               displayName: { type: 'string', description: 'Editable user-facing label (free-form; auto-generated friendly slug if omitted). The internal worker identity is a server-minted UUID.' },
               repos: { type: 'array', items: { $ref: '#/components/schemas/RepoConfig' } },
               mounts: { type: 'array', items: { $ref: '#/components/schemas/MountConfig' } },
-              environmentId: { type: 'string', description: 'Environment configuration ID' },
-              initScript: { type: 'string', description: 'Init script to run on startup' },
+              environmentId: { type: 'string', description: 'Environment id (resources, network policy, Docker, capabilities, instructions); default environment if omitted' },
+              initScript: { type: 'string', description: 'Bash run in tmux window 0 once setup finished — typically the content of an init script (e.g. the built-in `claude` one launches Claude Code). Empty = a plain shell.' },
             },
           },
         },

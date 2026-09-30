@@ -6,7 +6,7 @@ defineRouteMeta({
     operationId: 'createCapability',
     requestBody: {
       required: true,
-      content: { 'application/json': { schema: { $ref: '#/components/schemas/Capability' } } },
+      content: { 'application/json': { schema: { type: 'object', allOf: [{ $ref: '#/components/schemas/CapabilityInput' }], required: ['name', 'content'] } } },
     },
     responses: {
       201: { description: 'Created capability', content: { 'application/json': { schema: { $ref: '#/components/schemas/Capability' } } } },

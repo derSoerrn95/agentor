@@ -35,17 +35,19 @@ defineRouteMeta({
           },
           RepoConfig: {
             type: 'object',
+            description: 'A git repository cloned into /workspace when the worker starts',
             properties: {
-              provider: { type: 'string' },
-              url: { type: 'string' },
-              branch: { type: 'string' },
+              provider: { type: 'string', description: 'Git provider id (default github; private repos use the user\'s GITHUB_TOKEN)' },
+              url: { type: 'string', description: 'Clone URL, e.g. https://github.com/owner/repo' },
+              branch: { type: 'string', description: 'Branch to check out (default: the repository default branch)' },
             },
           },
           MountConfig: {
             type: 'object',
+            description: 'A host directory bind-mounted into the worker',
             properties: {
-              source: { type: 'string' },
-              target: { type: 'string' },
+              source: { type: 'string', description: 'Absolute path on the Docker host' },
+              target: { type: 'string', description: 'Absolute path inside the worker' },
               readOnly: { type: 'boolean' },
             },
           },

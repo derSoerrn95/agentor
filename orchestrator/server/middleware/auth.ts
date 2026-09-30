@@ -41,8 +41,9 @@ export default defineEventHandler(async (event) => {
   // CSRF: the session cookie is SameSite=Lax, which still lets same-site
   // pages (e.g. a worker's domain mapping on the dashboard's base domain)
   // submit forms to the API. State-changing cookie-authenticated requests must
-  // come from a trusted origin, like better-auth's own endpoints.
-  if (!SAFE_METHODS.has(event.method)) {
+  // come from a trusted origin, like better-auth's own endpoints. MCP tool
+  // calls (single-use internal capability, no session) carry no cookie and are exempt.
+  if (ctx.session && !SAFE_METHODS.has(event.method)) {
     const origin = getHeader(event, 'origin');
     if (!origin || !(await useAuth().$context).isTrustedOrigin(origin)) {
       throw createError({ statusCode: 403, statusMessage: 'Forbidden: untrusted request origin' });

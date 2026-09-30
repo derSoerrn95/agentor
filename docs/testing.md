@@ -246,6 +246,9 @@ Page navigation and interaction helpers for Playwright UI tests.
 ### `test-users.ts`
 Create / sign in / delete regular (non-admin) test users via the admin API: `createTestUser()`, `signInBrowserAsUser(context, …)` for UI tests, `signedInContext(email, password)` for an API request context acting as that user, `deleteTestUser()`.
 
+### `mcp.ts`
+MCP test client. `connectMcp(session)` connects an MCP SDK client through the real OAuth flow (RFC 9728 discovery, dynamic client registration, PKCE, token exchange) with the signed-in `session` approving on the consent screen; `connectMcpWithToken(token)` skips OAuth. `registerPublicClient` / `authorizationRequest` / `approveAuthorization` / `requestTokens` / `obtainTokens` drive individual OAuth steps; `callJson` / `callError` / `resultText` unwrap tool results. MCP tools are generated from the OpenAPI spec, so a route's tool name is `snake_case(operationId)`.
+
 ## Maintaining FEATURES.md
 
 `tests/FEATURES.md` is the canonical feature inventory — every user-facing feature must be listed there. It drives test coverage decisions.

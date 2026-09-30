@@ -20,16 +20,29 @@ defineRouteMeta({
     $global: {
       components: {
         schemas: {
+          InitScriptInput: {
+            type: 'object',
+            description: "Reusable bash script offered as a worker's init script — the program started in tmux window 0 when the worker starts (e.g. launching an agent CLI). Pass its `content` as `initScript` when creating a worker.",
+            properties: {
+              name: { type: 'string', description: 'Unique init script name' },
+              content: { type: 'string', description: 'Bash script (a shebang line is optional)' },
+            },
+          },
           InitScript: {
             type: 'object',
-            properties: {
-              id: { type: 'string' },
-              name: { type: 'string' },
-              content: { type: 'string' },
-              builtIn: { type: 'boolean' },
-              createdAt: { type: 'string', format: 'date-time' },
-              updatedAt: { type: 'string', format: 'date-time' },
-            },
+            allOf: [
+              { $ref: '#/components/schemas/InitScriptInput' },
+              {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  builtIn: { type: 'boolean', description: 'Platform-provided; read-only' },
+                  userId: { type: 'string', nullable: true, description: 'Owner (null for built-ins)' },
+                  createdAt: { type: 'string', format: 'date-time' },
+                  updatedAt: { type: 'string', format: 'date-time' },
+                },
+              },
+            ],
           },
         },
       },

@@ -5,6 +5,8 @@ defineRouteMeta({
     description:
       'Streams a complete worker export bundle (`.tar`) — manifest (settings, environment, port/domain mappings), the workspace and agent-data volumes, and (by default) a `docker export` of the container filesystem. Pass `?includeRootfs=false` to omit the filesystem snapshot (much smaller/faster). The worker must be running or stopped.',
     operationId: 'exportWorker',
+    // Multi-GB binary bundles do not fit through MCP tool results.
+    'x-mcp': false,
     parameters: [
       { name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Worker UUID' },
       { name: 'includeRootfs', in: 'query', required: false, schema: { type: 'boolean', default: true }, description: 'Include a docker-export snapshot of the container filesystem' },

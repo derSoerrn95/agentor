@@ -7,7 +7,7 @@ Every user-facing feature of the Agentor web dashboard, organized by category. T
 ## 0. Authentication & Authorization
 
 ### 0.1 First-run Setup
-- `/api/setup/status` is public and returns `{ needsSetup: boolean }`
+- `/api/setup/status` is public and returns `{ needsSetup, passkeysEnabled, mcpUrl }` (`mcpUrl` = the OAuth-protected MCP server URL, or `null` when MCP is disabled)
 - When no users exist, navigating to any dashboard URL redirects to `/setup`
 - Setup page asks for name, email, password, confirm password
 - Password must be at least 8 characters; passwords must match
@@ -56,7 +56,7 @@ Every user-facing feature of the Agentor web dashboard, organized by category. T
 - Create user form (name, email, password, role)
 - Change role action (promote to admin / demote to user)
 - Delete user action (with confirmation)
-- Backed by the `/api/users` REST API (§24.19); errors (e.g. duplicate email, demoting yourself) are shown in the modal
+- Backed by the `/api/users` REST API (§24.19) — the same routes the MCP user tools use; errors (e.g. duplicate email, demoting yourself) are shown in the modal
 
 ### 0.9 Account Card
 - Sidebar footer (pinned to bottom, always visible across tabs) shows the current user's avatar, name, email, admin badge, and a Sign out icon button
@@ -73,7 +73,8 @@ Every user-facing feature of the Agentor web dashboard, organized by category. T
 - **SSH Access section**: `sshPublicKey` textarea (4 rows, monospace) with its OWN **"Save SSH key"** button hitting `PUT /api/account/ssh-key`. The SSH key is NOT an env var — on save the key is written only to `<DATA_DIR>/users/<userId>/ssh/authorized_keys` (empty string → empty file), which is bind-mounted read-only at `/home/agent/.ssh/authorized_keys` in every one of the user's workers. Used by the **SSH** app (Apps pane → Start).
 - **Agent OAuth credentials section**: per-agent (claude/codex/gemini) status indicator (`Logged in` green / `Not logged in` gray) plus a per-agent **Reset** button (two-step confirm) that overwrites the OAuth file with `{}` so the next CLI login writes fresh tokens. Login itself happens by running the agent CLI inside one of the user's workers — credentials live at `<DATA_DIR>/users/<userId>/credentials/` and are bind-mounted into all of the user's workers.
 - Success and error messages displayed per section
-- Backed by `/api/auth/update-user`, `/api/auth/change-email`, `/api/auth/change-password` (built-in better-auth) and Agentor's per-user `/api/account/env-vars`, `/api/account/ssh-key`, and `/api/account/agent-credentials` endpoints
+- **MCP access section** (last section; hidden when MCP is disabled): the MCP server URL (`<public URL>/mcp`, copy button) with a `claude mcp add --transport http agentor <url>` example, and the list of **authorized applications** (OAuth clients the user approved: name, authorization date, scopes) each with a two-step **Revoke** (`Revoke` → `Confirm revoke`) that removes the app's consent and tokens; "No applications authorized." when empty
+- Backed by `/api/auth/update-user`, `/api/auth/change-email`, `/api/auth/change-password` (built-in better-auth) and Agentor's per-user `/api/account/env-vars`, `/api/account/ssh-key`, `/api/account/agent-credentials`, and `/api/account/oauth-apps` endpoints
 
 ### 0.9c Admin Password Reset
 - In the Users modal each row except your own has a "Reset password" button that prompts for a new password and calls `PUT /api/users/:id/password`
@@ -88,7 +89,7 @@ Every user-facing feature of the Agentor web dashboard, organized by category. T
 
 ### 0.11a CSRF / Origin enforcement
 - better-auth's `/api/auth/*` endpoints reject mutating requests without a trusted `Origin`
-- Every other `/api/*` request that changes state (anything but GET / HEAD / OPTIONS) and is authenticated by the session cookie must carry an `Origin` from the trusted-origins list; otherwise 403 `Forbidden: untrusted request origin`. This stops same-site pages (e.g. a worker's domain mapping on the dashboard's base domain) from submitting forms to the API with the SameSite=Lax cookie. Worker-self routes (no cookie) are unaffected
+- Every other `/api/*` request that changes state (anything but GET / HEAD / OPTIONS) and is authenticated by the session cookie must carry an `Origin` from the trusted-origins list; otherwise 403 `Forbidden: untrusted request origin`. This stops same-site pages (e.g. a worker's domain mapping on the dashboard's base domain) from submitting forms to the API with the SameSite=Lax cookie. Worker-self routes (no cookie) and MCP tool calls (internal capability) are unaffected
 
 ### 0.12 Passkey (WebAuthn) Authentication
 - **Conditional enablement**: Passkeys are only available when the dashboard is served over Traefik with both `DASHBOARD_SUBDOMAIN` and `DASHBOARD_BASE_DOMAIN` set. When disabled, the passkey plugin is not registered at all and every passkey UI element is hidden via the `passkeysEnabled` flag on `GET /api/setup/status`. WebAuthn config (when enabled): `rpID = <subdomain>.<base>` (override with `BETTER_AUTH_RP_ID`), `origin = https://<subdomain>.<base>`, `rpName = 'Agentor'`. Users must access the dashboard via the Traefik URL for passkey flows to work.
@@ -105,6 +106,12 @@ Every user-facing feature of the Agentor web dashboard, organized by category. T
   - `POST /api/account/remove-password` removes the password credential.
   - `POST /api/setup/create-admin-passkey-token` issues a one-shot 5-minute token for first-run passkey-only admin creation.
 - **Better-auth passkey endpoints** (mounted under `/api/auth/passkey/*` when enabled): `generate-register-options`, `verify-registration`, `list-user-passkeys`, `delete-passkey`, `update-passkey`, plus `/api/auth/sign-in/passkey`.
+
+### 0.13 OAuth 2.1 for MCP clients (consent + login continuation)
+- better-auth acts as an OAuth 2.1 authorization server for MCP clients (details in §29): authorization code + PKCE (S256), refresh tokens, Dynamic Client Registration and Client ID Metadata Documents
+- **Consent page** `/oauth/consent`: reached from `/api/auth/oauth2/authorize` with a signed query; shows "Authorize <client name>", the signed-in email, the origin approval redirects to (so look-alike client names can be spotted), and each requested scope with a description (`agentor` = full control of the account). **Approve** redirects back to the client's redirect URI with `code` + `state`; **Deny** redirects with `error=access_denied`. Visiting the page without a signed query shows an error and disabled buttons
+- **Login continuation**: a signed-out user starting an authorization is sent to `/login?<signed query>`, which shows "Sign in to authorize an application to access your Agentor account."; after email/password or passkey sign-in the authorization continues to the consent page (not the dashboard). With a signed query the login page does not auto-redirect a signed-in user to `/`; a signed-out visit to the consent page is redirected to `/login` with the signed query preserved, so signing in resumes the authorization
+- Apps a user authorized are listed / revocable in the Account modal (§0.9b)
 
 ---
 
@@ -396,7 +403,7 @@ The worker "detail" view is a fully editable **Worker Settings modal** (no more 
 - Loading state: "Loading settings..."
 - Collapsible sections by category: Docker, Worker Defaults, Git Providers (clone domains only; tokens are per-user), Domain Mapping, Network, Logging, Authentication, Init Scripts, App Types. (The legacy Agent Authentication section is removed — agent API keys and OAuth tokens are per-user and managed from the Account modal.)
 - Logging section exposes `LOG_LEVEL`, `LOG_MAX_SIZE` (human-readable megabytes), `LOG_MAX_FILES`.
-- Authentication section exposes better-auth settings: `BETTER_AUTH_SECRET` (status badge — value is never returned), `BETTER_AUTH_URL`, `BETTER_AUTH_TRUSTED_ORIGINS` (list, or "none" fallback), `BETTER_AUTH_RP_ID` (shows the auto-derived `<subdomain>.<baseDomain>` value when unset and the dashboard domain is configured, or "passkeys disabled" when neither an override nor a dashboard domain is set).
+- Authentication section exposes better-auth settings: `BETTER_AUTH_SECRET` (status badge — value is never returned), `BETTER_AUTH_URL` (the public URL / OAuth issuer origin; shows the auto-derived value with `(auto)` when unset), `MCP_ENABLED` (the MCP server URL, or `disabled — <reason>`), `BETTER_AUTH_TRUSTED_ORIGINS` (list, or "none" fallback), `BETTER_AUTH_RP_ID` (shows the auto-derived `<subdomain>.<baseDomain>` value when unset and the dashboard domain is configured, or "passkeys disabled" when neither an override nor a dashboard domain is set).
 - Per-item: label + env var key (monospace) + value display
   - Status type: colored badge (configured=success)
   - Boolean type: badge (enabled/disabled)
@@ -772,7 +779,7 @@ Every pane type supports **multiple simultaneous instances**. Clicking the Termi
 - Port and domain mappings survive stop/restart, archive/unarchive, and rebuild — they are keyed by the globally unique `containerName` which is stable across the worker's whole lifecycle. Traefik routes to the container by DNS name, so lookups pick up the new container after rebuild/unarchive without any mapping changes. Mappings are only removed on permanent delete (`DELETE /api/containers/:id` or `DELETE /api/archived/:id`).
 - `GET /api/containers/:id/logs` — logs with optional ?tail=N (default 200, max 10000)
 - `GET /api/containers/:id/workspace` — download workspace .tar.gz; optional `?path=` downloads a file or sub-directory (relative to, or absolute inside, `/workspace`; filename `<displayName>-<basename>.tar.gz`). Paths escaping `/workspace` → 400, missing paths → 404. An abandoned download (client disconnects) ends Docker's archive stream, so the worker is not left locked
-- `POST /api/containers/:id/workspace` — upload files: multipart (each part's filename is its path under `/workspace`) or JSON `{ files: [{ path, content, encoding: 'utf8' | 'base64' }] }`. Paths are relative to, or absolute inside, `/workspace`; parent directories are created, files are owned by `agent`; `..` segments or paths outside the workspace → 400
+- `POST /api/containers/:id/workspace` — upload files: multipart (each part's filename is its path under `/workspace`) or JSON `{ files: [{ path, content, encoding: 'utf8' | 'base64' }] }` (used by MCP). Paths are relative to, or absolute inside, `/workspace`; parent directories are created, files are owned by `agent`; `..` segments or paths outside the workspace → 400
 - `POST /api/containers/:id/exec` — run a bash command as the `agent` user (agent CLIs on PATH): body `{ command, cwd?, timeoutSeconds? }` (default cwd `/workspace`, timeout 60 s, max 600 s) → `{ exitCode, stdout, stderr, truncated, timedOut, durationMs }`; stdout/stderr capped at 1 MiB each. 400 on invalid body, 404 unknown worker, 403 other user's worker, 409 when not running
 - `GET /api/containers/:id/desktop/screenshot` — PNG (`image/png`, 1920x1080) of the worker's virtual display (maim). 409 when not running
 - `POST /api/containers/:id/desktop/input` — one mouse / keyboard action on the virtual display (xdotool): `{ action, x?, y?, toX?, toY?, text?, keys?, direction?, amount? }` with actions `click` / `double_click` / `right_click` / `middle_click` (at x,y or the current pointer), `move`, `drag` (x,y → toX,toY), `scroll` (direction up/down/left/right, amount 1–50, default 3), `type` (text), `key` (xdotool key names, e.g. `ctrl+l Return`). Field validation → 400
@@ -886,6 +893,8 @@ Every pane type supports **multiple simultaneous instances**. Clicking the Termi
 ### 24.15a Per-user Account env vars and credentials
 - `GET /api/account/me` — the current user `{ id, name, email, role, emailVerified, banned, createdAt, updatedAt }`
 - `PATCH /api/account/profile` — update the current user's `name` and/or `email` (validated; taken email → 409; `role` is ignored)
+- `GET /api/account/oauth-apps` — OAuth applications (MCP clients) the current user authorized: `[{ clientId, name, uri?, scopes, authorizedAt }]`
+- `DELETE /api/account/oauth-apps/:clientId` — revoke one (consent + refresh / access tokens deleted; the MCP endpoint rejects the client immediately); 404 when not authorized
 - `GET /api/account/env-vars` — returns the current user's `UserEnvVars` `{ userId, createdAt, updatedAt, envVars: [{ key, value }] }` — a single uniform list keyed by the env var NAME, no hardcoded fields. Owner-only — admins do NOT see other users' values via this endpoint.
 - `PUT /api/account/env-vars` — REPLACES the current user's `envVars` list with the supplied `{ envVars: [...] }`. There is no per-field/partial-update semantics anymore — the whole list is the unit of update. Every key must match `[A-Z_][A-Z0-9_]*`, must not collide with reserved names (`ENVIRONMENT`, `WORKER`, `ORCHESTRATOR_URL`, etc.), and must be unique. Validation failures return 400.
 - `GET /api/account/ssh-key` — returns the current user's SSH public key `{ sshPublicKey }`, read from `<DATA_DIR>/users/<userId>/ssh/authorized_keys`. Owner-only. The SSH key is NOT stored in env-vars.json.
@@ -1013,3 +1022,29 @@ The session-authenticated `/api/port-mappings`, `/api/domain-mappings`, and `/ap
 - Restore steps: resolve/create the environment (built-in reused by id; a user's same-named env reused; otherwise the embedded definition is recreated as a new custom env) → import `rootfs.tar.gz` into a per-worker image (`agentor-import-<id>`) when present, replicating the standard image's entrypoint/env so it boots — **falls back to the standard worker image if the rootfs import fails** → create the container stopped → restore the workspace + agent-data volumes via `putArchive` → start → recreate port/domain mappings (skipping conflicts and base domains not configured on this machine).
 - A worker restored with a captured filesystem persists its per-worker image link (`importedImage` on the WorkerRecord) so the rootfs survives rebuild/unarchive; the image is removed on permanent delete.
 - Validation: 400 on an invalid/garbage bundle, 401 unauth. The displayName override (`?displayName=`) sets the restored worker's label.
+
+---
+
+## 29. MCP Server
+
+### 29.1 Endpoint & protocol
+- MCP server at `<public URL>/mcp` (Streamable HTTP; stateless — serves both the 2025-era and the 2026-07-28 protocol revisions; GET/DELETE → 405). The public URL is configured via `.env.example` (`BETTER_AUTH_URL`; defaults to the Traefik dashboard URL, else `http://localhost:3000`)
+- Enabled unless `MCP_ENABLED=false`; automatically disabled (404, reason in System Settings) when the public URL is plain http on a non-loopback host
+- Server info `agentor`; the initialize result carries **instructions**: what Agentor is, core concepts (workers, environments, capabilities, instructions, init scripts, port/domain mappings, apps, archive vs delete, account), typical workflows referencing real tool names, and rules of thumb. The same guide is readable as the resource `agentor://guide` (`text/markdown`)
+
+### 29.2 Authorization (OAuth 2.1)
+- Unauthenticated requests → 401 with `WWW-Authenticate: Bearer resource_metadata="<public URL>/.well-known/oauth-protected-resource/mcp", scope="agentor"`
+- Protected-resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-protected-resource`: `resource` = the MCP URL, `authorization_servers` = [`<public URL>/api/auth`], `scopes_supported` = [`agentor`]
+- Authorization-server metadata (RFC 8414) at `/.well-known/oauth-authorization-server/api/auth` (and `/api/auth/.well-known/…`): authorize / token / registration / JWKS / introspection / revocation endpoints, `S256` PKCE, scopes `openid profile email offline_access agentor`, Client ID Metadata Documents supported
+- Clients register via Dynamic Client Registration (`POST /api/auth/oauth2/register`, no session needed; clients with only http loopback redirect URIs are treated as native apps) or CIMD
+- Users sign in on `/login` and approve on `/oauth/consent` (§0.13); access tokens are JWTs bound to the MCP resource with scope `agentor` (full access as the user); `offline_access` adds refresh tokens
+- Every MCP request re-checks the user (deleted or banned → 401) and the user's consent for the client (revoked → 401) — revocation is immediate even for unexpired tokens
+
+### 29.3 Tools
+- Generated at runtime from the REST API's OpenAPI spec (`/api/docs/openapi.json`) with `mcp-from-openapi`: one tool per documented route (`snake_case(operationId)`, e.g. `create_container`, `exec_command`, `send_tmux_keys`, `capture_tmux_window`, `get_desktop_screenshot`, `send_desktop_input`, `upload_to_workspace`, `download_workspace`, `list_users`, …) — ~97 tools for an admin
+- Excluded: worker-self, setup, health and internal proxy/WebSocket routes, and routes marked `x-mcp: false` (own-password set/remove, worker export/import)
+- Admin-only routes (`x-admin-only`) are hidden from regular users' tool lists (users, logs, settings, updates)
+- Input schemas = path + query + JSON body parameters from the route metadata (enums, required fields, descriptions); tool descriptions = summary + description; annotations from the HTTP method (GET read-only, DELETE destructive, …); arguments violating the schema are rejected before the route runs
+- Execution: each call is re-dispatched (loopback HTTP) to the REST route as the calling user (single-use internal capability), so validation, ownership (403 for other users' resources) and side effects are identical to the dashboard
+- Results: JSON → pretty-printed text; `text/*` → text; images → image content (desktop screenshot); other binaries (workspace `.tar.gz`) → embedded blob resource; any response body above 16 MiB is abandoned while streaming and reported as a tool error; route errors → tool error `HTTP <status>: <message>`
+

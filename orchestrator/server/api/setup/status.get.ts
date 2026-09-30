@@ -14,8 +14,9 @@ defineRouteMeta({
               properties: {
                 needsSetup: { type: 'boolean', description: 'True if no users exist yet' },
                 passkeysEnabled: { type: 'boolean', description: 'True when passkey authentication is configured (requires the dashboard to be served over Traefik with DASHBOARD_SUBDOMAIN set)' },
+                mcpUrl: { type: 'string', nullable: true, description: 'URL of the MCP server (OAuth-protected), or null when MCP is disabled' },
               },
-              required: ['needsSetup', 'passkeysEnabled'],
+              required: ['needsSetup', 'passkeysEnabled', 'mcpUrl'],
             },
           },
         },
@@ -24,7 +25,7 @@ defineRouteMeta({
   },
 });
 
-import { hasAnyUsers, useAuth, isPasskeyEnabled } from '../../utils/auth';
+import { hasAnyUsers, useAuth, isPasskeyEnabled, getMcpAuthConfig } from '../../utils/auth';
 
 export default defineEventHandler(() => {
   // Ensure auth is initialized (so the user table exists before we query it)
@@ -32,5 +33,6 @@ export default defineEventHandler(() => {
   return {
     needsSetup: !hasAnyUsers(),
     passkeysEnabled: isPasskeyEnabled(),
+    mcpUrl: getMcpAuthConfig().resource ?? null,
   };
 });

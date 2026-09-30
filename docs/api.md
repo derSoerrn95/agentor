@@ -10,7 +10,7 @@ Auto-generated OpenAPI 3.1.0 docs powered by Nitro's built-in OpenAPI support. Z
 
 **How it works:** Each route file has a top-level `defineRouteMeta()` call (auto-imported Nitro macro) that enriches the generated spec with tags, summaries, schemas, parameters, and request/response bodies. Nitro auto-discovers all file-based routes and merges the metadata into a single OpenAPI spec.
 
-**Tag groups (21):** Containers (incl. command exec, desktop screenshot / input, worker export/import), Tmux (incl. send-keys / capture), Apps, Port Mappings, Domain Mappings, Environments, Capabilities, Instructions, Init Scripts, Archived Workers, Logs, Updates, GitHub, Usage, Metrics (per-worker resource metrics, via the Docker API — no host metrics), Config, Account (incl. current user, profile), Users (admin user management), Setup, Health, Worker Self — plus an "Internal" tag for proxy/WebSocket relay routes.
+**Tag groups (21):** Containers (incl. command exec, desktop screenshot / input, worker export/import), Tmux (incl. send-keys / capture), Apps, Port Mappings, Domain Mappings, Environments, Capabilities, Instructions, Init Scripts, Archived Workers, Logs, Updates, GitHub, Usage, Metrics (per-worker resource metrics, via the Docker API — no host metrics), Config, Account (incl. current user, profile, authorized OAuth apps), Users (admin user management), Setup, Health, Worker Self — plus an "Internal" tag for proxy/WebSocket relay routes.
 
 The **Worker Self** group contains the unauthenticated, source-IP-identified routes mounted at `/api/worker-self/*` for use from inside worker containers (port mappings, domain mappings, usage, info). See `docs/environments.md` for details on how `requireWorkerSelf()` resolves the calling worker.
 
@@ -22,6 +22,7 @@ The **Worker Self** group contains the unauthenticated, source-IP-identified rou
 2. Include `tags`, `summary`, `operationId`, `parameters` (for path/query params), `requestBody` (for POST/PUT), and `responses`
 3. For new entity types, define the schema in `$global.components.schemas` in the "list" route and reference via `$ref` elsewhere
 4. The Scalar UI at `/api/docs` updates automatically — no rebuild needed in dev
+5. **The route is now also an MCP tool** (`snake_case(operationId)`) — the MCP server generates its tools from this spec (see @docs/mcp.md). Write the `description` for an agent reader (what it does, when to use it, what fields mean), add `'x-admin-only': true` next to `requireAdmin`, or `'x-mcp': false` to keep the route out of MCP
 
 **Configuration** in `orchestrator/nuxt.config.ts` under `nitro.openAPI`:
 - `production: 'runtime'` — spec available in production builds

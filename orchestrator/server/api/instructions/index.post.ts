@@ -6,7 +6,7 @@ defineRouteMeta({
     operationId: 'createInstruction',
     requestBody: {
       required: true,
-      content: { 'application/json': { schema: { $ref: '#/components/schemas/Instruction' } } },
+      content: { 'application/json': { schema: { type: 'object', allOf: [{ $ref: '#/components/schemas/InstructionInput' }], required: ['name', 'content'] } } },
     },
     responses: {
       201: { description: 'Created instruction', content: { 'application/json': { schema: { $ref: '#/components/schemas/Instruction' } } } },

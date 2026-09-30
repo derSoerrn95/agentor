@@ -7,7 +7,7 @@ defineRouteMeta({
     parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' }, description: 'Init script ID' }],
     requestBody: {
       required: true,
-      content: { 'application/json': { schema: { $ref: '#/components/schemas/InitScript' } } },
+      content: { 'application/json': { schema: { $ref: '#/components/schemas/InitScriptInput' } } },
     },
     responses: {
       200: { description: 'Updated init script', content: { 'application/json': { schema: { $ref: '#/components/schemas/InitScript' } } } },

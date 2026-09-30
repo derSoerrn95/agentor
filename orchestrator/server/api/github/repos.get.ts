@@ -3,7 +3,7 @@ defineRouteMeta({
     tags: ['GitHub'],
     summary: 'List GitHub repos',
     description: 'Returns repositories accessible to the current user\'s GitHub account. The token comes from the caller\'s per-user Account settings.',
-    operationId: 'listGitHubRepos',
+    operationId: 'listGithubRepos',
     responses: {
       200: {
         description: 'GitHub repositories plus token/account context',

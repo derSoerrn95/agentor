@@ -20,16 +20,29 @@ defineRouteMeta({
     $global: {
       components: {
         schemas: {
+          InstructionInput: {
+            type: 'object',
+            description: "AGENTS.md-style markdown merged into the agents' global instructions (CLAUDE.md, AGENTS.md, GEMINI.md) of workers whose environment enables it.",
+            properties: {
+              name: { type: 'string', description: 'Unique instruction name' },
+              content: { type: 'string', description: 'Markdown instructions for the agents' },
+            },
+          },
           Instruction: {
             type: 'object',
-            properties: {
-              id: { type: 'string' },
-              name: { type: 'string' },
-              content: { type: 'string' },
-              builtIn: { type: 'boolean' },
-              createdAt: { type: 'string', format: 'date-time' },
-              updatedAt: { type: 'string', format: 'date-time' },
-            },
+            allOf: [
+              { $ref: '#/components/schemas/InstructionInput' },
+              {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  builtIn: { type: 'boolean', description: 'Platform-provided; read-only' },
+                  userId: { type: 'string', nullable: true, description: 'Owner (null for built-ins)' },
+                  createdAt: { type: 'string', format: 'date-time' },
+                  updatedAt: { type: 'string', format: 'date-time' },
+                },
+              },
+            ],
           },
         },
       },

@@ -60,7 +60,7 @@ export interface BuiltInEnvironment {
   enabledInstructionIds: string[] | null;
 }
 
-function toText(raw: unknown): string {
+export function toText(raw: unknown): string {
   if (typeof raw === 'string') return raw;
   if (raw instanceof Uint8Array) return new TextDecoder().decode(raw);
   return String(raw);

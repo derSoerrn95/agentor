@@ -4,6 +4,7 @@ defineRouteMeta({
     summary: 'Get all system settings',
     description: 'Returns all system configuration organized by category. Values are read-only (set via environment variables). Sensitive values are masked.',
     operationId: 'getSettings',
+    'x-admin-only': true,
     responses: {
       200: {
         description: 'Array of setting sections, each containing categorized setting items',
@@ -17,6 +18,7 @@ import { useConfig, useInitScriptStore } from '../utils/services';
 import { listGitProviders } from '../utils/git-providers';
 import { listAppTypes } from '../utils/apps';
 import { requireAdmin } from '../utils/auth-helpers';
+import { getMcpAuthConfig } from '../utils/auth';
 
 interface SettingItem {
   key: string;
@@ -39,6 +41,7 @@ function statusValue(configured: boolean): string {
 export default defineEventHandler(async (event) => {
   requireAdmin(event);
   const config = useConfig();
+  const mcp = getMcpAuthConfig();
   const sections: SettingSection[] = [];
 
   // --- Docker & Infrastructure ---
@@ -204,8 +207,8 @@ export default defineEventHandler(async (event) => {
       },
       {
         key: 'BETTER_AUTH_URL',
-        label: 'Base URL',
-        value: config.betterAuthUrl || 'http://localhost:3000 (default)',
+        label: 'Public URL (OAuth issuer)',
+        value: config.betterAuthUrl || `${config.publicBaseUrl} (auto)`,
         type: 'string',
       },
       {
@@ -222,6 +225,12 @@ export default defineEventHandler(async (event) => {
         value: config.betterAuthRpId || (config.dashboardSubdomain && config.dashboardBaseDomain
           ? `${config.dashboardSubdomain}.${config.dashboardBaseDomain} (auto)`
           : 'passkeys disabled (no dashboard domain)'),
+        type: 'string',
+      },
+      {
+        key: 'MCP_ENABLED',
+        label: 'MCP Server',
+        value: mcp.enabled ? mcp.resource! : `disabled — ${mcp.disabledReason}`,
         type: 'string',
       },
     ],

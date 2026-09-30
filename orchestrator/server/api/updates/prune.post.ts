@@ -4,6 +4,7 @@ defineRouteMeta({
     summary: 'Prune dangling images',
     description: 'Removes dangling Docker images (untagged layers left behind by builds) to reclaim disk space.',
     operationId: 'pruneImages',
+    'x-admin-only': true,
     responses: {
       200: {
         description: 'Prune result',

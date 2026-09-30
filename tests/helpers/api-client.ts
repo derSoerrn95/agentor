@@ -57,7 +57,7 @@ export class ApiClient {
     return { status: res.status(), body: await res.json() };
   }
 
-  // ─── Account: current user + profile ──────────────────────────
+  // ─── Account: profile + authorized OAuth apps ─────────────────
   async getCurrentUser() {
     const res = await this.request.get(`${BASE_URL}/api/account/me`);
     return { status: res.status(), body: await res.json() };
@@ -65,6 +65,16 @@ export class ApiClient {
 
   async updateAccountProfile(data: Record<string, unknown>) {
     const res = await this.request.patch(`${BASE_URL}/api/account/profile`, { data });
+    return { status: res.status(), body: await res.json() };
+  }
+
+  async listAuthorizedApps() {
+    const res = await this.request.get(`${BASE_URL}/api/account/oauth-apps`);
+    return { status: res.status(), body: await res.json() };
+  }
+
+  async revokeAuthorizedApp(clientId: string) {
+    const res = await this.request.delete(`${BASE_URL}/api/account/oauth-apps/${encodeURIComponent(clientId)}`);
     return { status: res.status(), body: await res.json() };
   }
 

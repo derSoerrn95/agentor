@@ -4,6 +4,7 @@ defineRouteMeta({
     summary: 'Trigger update check',
     description: 'Triggers an immediate check for image updates.',
     operationId: 'triggerUpdateCheck',
+    'x-admin-only': true,
     responses: {
       200: {
         description: 'Update status after the check',

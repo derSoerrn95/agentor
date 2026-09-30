@@ -10,9 +10,14 @@ const error = ref('');
 const loading = ref(false);
 const passkeyLoading = ref(false);
 const passkeysEnabled = ref(false);
+// Reached from an OAuth (MCP client) authorization: signing in resumes the
+// authorization instead of opening the dashboard.
+const oauthFlow = ref(false);
 
 // If already signed in, send to dashboard
 onMounted(async () => {
+  oauthFlow.value = isOAuthAuthorizationPage();
+
   try {
     const status = await $fetch<{ needsSetup: boolean; passkeysEnabled: boolean }>('/api/setup/status');
     if (status.needsSetup) {
@@ -28,7 +33,9 @@ onMounted(async () => {
   // reactive `useSession()` hook which fetches async and may not be ready.
   try {
     const session: any = await $fetch('/api/auth/get-session');
-    if (session?.user) {
+    // An OAuth authorization only lands here when it demands a fresh login
+    // (`prompt=login`) — keep the form so the user can re-authenticate.
+    if (session?.user && !oauthFlow.value) {
       if (typeof window !== 'undefined') {
         window.location.href = '/';
       } else {
@@ -53,7 +60,7 @@ onMounted(async () => {
     if (PKC?.isConditionalMediationAvailable && (await PKC.isConditionalMediationAvailable())) {
       void client.signIn.passkey({ autoFill: true }).then((result: any) => {
         if (result?.data && !result?.error) {
-          window.location.href = '/';
+          afterSignIn(result.data);
         }
       });
     }
@@ -62,7 +69,8 @@ onMounted(async () => {
   }
 });
 
-function reload() {
+function afterSignIn(data: unknown) {
+  if (followOAuthRedirect(data)) return;
   if (typeof window !== 'undefined') window.location.href = '/';
 }
 
@@ -79,7 +87,7 @@ async function handleSubmit() {
       error.value = (result as any).error.message || 'Sign-in failed';
       return;
     }
-    reload();
+    afterSignIn((result as any)?.data);
   } catch (err: any) {
     error.value = err?.message || 'Sign-in failed';
   } finally {
@@ -96,7 +104,7 @@ async function handlePasskeySignIn() {
       error.value = (result as any).error.message || 'Passkey sign-in failed';
       return;
     }
-    reload();
+    afterSignIn((result as any)?.data);
   } catch (err: any) {
     error.value = err?.message || 'Passkey sign-in failed';
   } finally {
@@ -115,6 +123,9 @@ async function handlePasskeySignIn() {
 
       <div class="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6">
         <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Sign in</h2>
+        <p v-if="oauthFlow" data-testid="oauth-login-notice" class="-mt-2 mb-4 text-sm text-gray-500 dark:text-gray-400">
+          Sign in to authorize an application to access your Agentor account.
+        </p>
 
         <form @submit.prevent="handleSubmit" class="space-y-4">
           <UFormField label="Email" required>

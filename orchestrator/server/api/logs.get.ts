@@ -5,6 +5,7 @@ defineRouteMeta({
     tags: ['Logs'],
     summary: 'Query log entries',
     operationId: 'getLogs',
+    'x-admin-only': true,
     parameters: [
       { name: 'sources', in: 'query', schema: { type: 'string' }, description: 'Comma-separated log sources (orchestrator,worker,traefik)' },
       { name: 'sourceIds', in: 'query', schema: { type: 'string' }, description: 'Comma-separated container names' },

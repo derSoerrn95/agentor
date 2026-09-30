@@ -4,7 +4,7 @@ Comprehensive end-to-end test suite for the Agentor platform using Playwright an
 
 ## Overview
 
-- **~1422 tests** across 106 test files (~879 API + ~543 UI)
+- **~1468 tests** across 110 test files (~918 API + ~550 UI)
 - **API tests**: headless, no browser needed, fast execution
 - **UI tests**: Desktop Chrome (1920x1080), real browser interactions
 - **Terminal tests**: WebSocket-based command execution and agent CLI prompting
@@ -98,13 +98,14 @@ tests/
     worker-lifecycle.ts    # Container create/cleanup utilities
     ui-helpers.ts          # Page navigation and interaction helpers
     terminal-ws.ts         # WebSocket terminal client + ANSI stripping + credential checks
-  api/                     # API endpoint tests (~879 tests across 62 files)
-  ui/                      # UI interaction tests (~543 tests across 44 files)
+    mcp.ts                 # MCP client over the real OAuth flow (MCP SDK) + hand-driven OAuth steps + tool-call helpers
+  api/                     # API endpoint tests (~918 tests across 65 files)
+  ui/                      # UI interaction tests (~550 tests across 45 files)
 ```
 
 ## Test Categories
 
-### API Tests (~879 tests, 62 files)
+### API Tests (~918 tests, 65 files)
 
 | File | Tests | Coverage |
 |------|-------|----------|
@@ -138,7 +139,7 @@ tests/
 | `capabilities.spec.ts` | 24 | Capabilities CRUD, built-in capabilities (UUID id derived from slug — `tmux` is the name, fetch by UUID), validation |
 | `instructions.spec.ts` | 27 | Instruction entry CRUD, built-in entries (UUID id derived from slug — `platform-guide` is the name, fetch by UUID), validation |
 | `init-scripts.spec.ts` | 25 | Init script CRUD, built-in scripts (UUID id derived from slug — `claude` is the name, fetch by UUID), validation |
-| `settings.spec.ts` | 13 | Settings endpoint, categorized sections — verifies the legacy `agent-auth` section is gone and `git-providers` reports clone domains only (no per-user tokens), plus the new `logging` (LOG_LEVEL / LOG_MAX_SIZE / LOG_MAX_FILES) and `authentication` (BETTER_AUTH_SECRET status-only, BETTER_AUTH_URL / TRUSTED_ORIGINS / RP_ID) sections |
+| `settings.spec.ts` | 13 | Settings endpoint, categorized sections — verifies the legacy `agent-auth` section is gone and `git-providers` reports clone domains only (no per-user tokens), plus the new `logging` (LOG_LEVEL / LOG_MAX_SIZE / LOG_MAX_FILES) and `authentication` (BETTER_AUTH_SECRET status-only, BETTER_AUTH_URL / TRUSTED_ORIGINS / RP_ID) sections; the Authentication section also reports the MCP server (`MCP_ENABLED` item: the `/mcp` URL or why it is disabled) |
 | `account-env-vars.spec.ts` | 17 | Split into an **env-vars** describe and an **SSH-key** describe. Env vars: GET/PUT auth gating, fresh-user default (empty `envVars` list), uniform `{ envVars: [{key,value}] }` round-trip (predefined + custom keys handled identically), `PUT` REPLACES the whole list, validation (lowercase / digit-prefixed / reserved / duplicate keys → 400), per-user isolation, admin cannot see another user's values via the endpoint. SSH key (`/api/account/ssh-key`): GET/PUT auth gating, fresh-user default empty, round-trip, empty-string clears the file, per-user isolation, and the SSH key never appears in env-vars.json. |
 | `account-credentials.spec.ts` | 5 | Per-user agent OAuth credential file listing + reset: auth gating, 3-entry shape for a fresh user, idempotent DELETE, unknown agent id rejection, independent listings per user |
 | `user-scoped-worker-env.spec.ts` | 3 | End-to-end propagation: GITHUB_TOKEN, ANTHROPIC_API_KEY, and arbitrary custom env vars (all sent as the uniform `{ envVars: [{key,value}] }` list) from one user's account flow into that user's workers via printenv; user A's worker shows A's token while B's shows B's; an Environment's envVars override the per-user value |
@@ -165,13 +166,16 @@ tests/
 | `worker-export-import.spec.ts` | 9 | Export streams a `.tar` bundle (content-type/disposition; manifest + workspace.tar.gz + agents.tar.gz present, rootfs.tar.gz absent with `includeRootfs=false`), export 404/401; import rejects a garbage bundle (400) + 401 unauth; **round-trip**: upload a marker file → export → import (fresh UUID id, `agentor-worker-<id>` name, displayName override) → boot → download workspace and confirm the marker file restored; and port-mapping recreation for the imported worker (export with a mapping, remove source, import, assert mapping re-created on the new containerName). Round-trip uses `includeRootfs=false` for speed — the docker-export rootfs path is exercised via the default-on UI export, not in CI. |
 | `github-repos.spec.ts` | 3 | `GET /api/github/repos`: requires auth; a fresh user with no token → `tokenConfigured:false` + empty repos; a configured-but-bogus token → `tokenConfigured:true` with a surfaced `error` (regression for the old "any failure looks like no token" masking). Uses isolated test users. |
 | `ssh-auth.spec.ts` | 4 | SSH app end-to-end: starting the SSH app allocates a `22000–22999` external port mapping; a remote `whoami` over ssh with the user-supplied pubkey returns `agent`; ssh auth fails with a wrong key; a public-key update (`PUT /api/account/ssh-key`) propagates live to a running worker. (Live E2E — inherently timing-sensitive; relies on Playwright retries.) |
+| `mcp-oauth.spec.ts` | 15 | MCP authorization server + resource server: unauthenticated `/mcp` → 401 with RFC 9728 `WWW-Authenticate` (resource_metadata + `agentor` scope); protected-resource metadata (root + `/mcp`-inserted) and issuer-inserted AS metadata (endpoints, S256, `agentor` scope, CIMD support); anonymous Dynamic Client Registration (loopback redirect → native client); unauthenticated authorize → `/login` with a signed query; **the MCP SDK client's own OAuth flow** (discovery → DCR → PKCE → consent → token) lists >50 tools and gets a refresh token; a 2025-era client (MCP SDK v1, Bearer token) is served by the same stateless endpoint (instructions, tools, a tool call); access tokens are JWTs (`aud` = `/mcp`, `iss` = `/api/auth`, `agentor` scope); refresh grant yields a working token; denying consent → `access_denied` + state; invalid tokens rejected; stateless GET → 405; authorized apps start empty, revoking an unknown app is 404, both need a session; revoking the app (consent + tokens) cuts off an unexpired JWT immediately and kills the refresh token; deleting the user cuts off MCP access |
+| `mcp-tools.spec.ts` | 8 | Tool catalog generated from the OpenAPI spec: a tool for every dashboard capability (workers, lifecycle, exec, tmux I/O, desktop, files, apps, port/domain mappings, environments, capabilities, instructions, init scripts, account, usage, metrics, GitHub) plus admin tools; never exposes worker-self / setup / health / internal / password / export-import routes; valid names + descriptions + object schemas; input schemas from route metadata (required fields, enums); HTTP-derived annotations; server instructions explain Agentor and reference real tools; `agentor://guide` resource equals the instructions; regular users don't see `x-admin-only` tools |
+| `mcp-platform.spec.ts` | 16 | End-to-end platform control **only through MCP tools** (serial): environment/capability/instruction/init-script CRUD; create a worker; exec (stdout, exit codes); JSON upload (UTF-8 + base64) and sub-path download as an embedded `.tar.gz` blob; a 20 MB download is refused at the 16 MiB cap while the orchestrator stays healthy and the worker still accepts commands (the abandoned archive stream is closed, releasing Docker's container lock); tmux create → send keys → capture computed output → rename → delete; desktop screenshot as image content + click verified via xdotool; port mapping + socks5 app lifecycle; domain mapping (skipped without `BASE_DOMAINS`); settings rename, stop/restart, archive/unarchive, logs; account/usage/metrics/authorized apps; admin user CRUD; route errors as `HTTP <status>` tool errors and SDK-side schema validation; another user's MCP session can't see or touch the worker (403); delete |
 | `worker-exec.spec.ts` | 11 | `POST /api/containers/:id/exec`: stdout + exit code, separate stderr, runs as `agent` in `/workspace` with the agent CLIs on PATH, `cwd`, timeout kills the command (`timedOut`), 1 MiB output cap (`truncated`), body validation (command / cwd / timeoutSeconds), 404 unknown worker, 403 other user's worker, 401 unauth, 409 stopped worker |
 | `tmux-io.spec.ts` | 7 | tmux send-keys / capture: text + Enter runs and the capture shows the computed output; `keys` sent before text (C-c interrupts a running command); text starting with `-` is typed, not parsed as tmux options; `history` includes scrollback beyond the visible screen; unknown window → 404; input validation (keys shape/names, text, enter, windowIndex, history) → 400; unknown worker → 404 |
 | `desktop-control.spec.ts` | 7 | Desktop screenshot is a 1920x1080 PNG (`image/png`); `move` / `click` variants / `drag` verified via `xdotool getmouselocation`; scroll / type / key actions succeed; action validation (unknown action, missing/negative/partial coordinates, drag target, text, unsafe key strings, direction, amount) → 400; unknown worker → 404 |
 | `users.spec.ts` | 11 | `/api/users` admin API: list (roles, shape), create (user signs in; admin role; email lowercased), create validation (400s) + duplicate email 409, update name/email/role (+ 409 / 400 cases), an admin cannot demote, delete or reset the password of themselves, set password (new works, old fails, short 400), delete (gone from list, can't sign in), unknown ids 404, regular users 403 on every route, 401 unauth |
 | `account-profile.spec.ts` | 4 | `GET /api/account/me` (admin identity + role); a user updates their own name/email via `PATCH /api/account/profile`; profile validation (empty body/name, bad email 400, taken email 409, role cannot be escalated); 401 unauth |
 
-### UI Tests (~543 tests, 44 files)
+### UI Tests (~550 tests, 45 files)
 
 | File | Tests | Coverage |
 |------|-------|----------|
@@ -219,6 +223,7 @@ tests/
 | `worker-card-actions.spec.ts` | 3 | Refactored worker card: the running card exposes the Export button (tooltip), the action row is a horizontally-scrollable strip (`overflow-x: auto`), and per-worker live metrics (`data-testid="worker-metrics"`) render CPU%/RAM% from a stubbed `/api/worker-metrics` |
 | `import-worker-modal.spec.ts` | 2 | Import Worker modal opens from the sidebar Import button with file + name inputs and a disabled Import button; choosing a `.tar` file enables Import and shows the file name |
 | `github-autocomplete-refresh.spec.ts` | 1 | Regression: saving env vars in the Account modal refetches `/api/git-providers` (so the repo autocomplete gate updates without a page reload); env-vars PUT is stubbed so no real account state is mutated |
+| `mcp-oauth.spec.ts` | 7 | OAuth in the browser: a signed-in user approves an app on the consent page (client name, redirect origin, `agentor` scope description, email) → redirect with code + state; Deny → `access_denied`; a signed-out user lands on `/login` with the OAuth notice, signs in, and continues to consent + code; a consent page opened after the session ended goes to `/login` with the signed query and resumes; the consent page links http(s) client homepages but never a `javascript:` client_uri; the consent page refuses direct visits; Account modal → MCP access shows the `/mcp` URL and revokes an authorized app (two-step) |
 
 ## Design Decisions
 

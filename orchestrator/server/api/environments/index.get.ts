@@ -20,34 +20,51 @@ defineRouteMeta({
     $global: {
       components: {
         schemas: {
-          Environment: {
+          EnvironmentInput: {
             type: 'object',
+            description: 'Reusable worker configuration: resources, network policy, Docker-in-Docker, env vars, setup script, and which capabilities / instructions / worker-self APIs its workers get. Changes apply to a worker on its next create or rebuild.',
             properties: {
-              id: { type: 'string' },
-              name: { type: 'string' },
-              cpuLimit: { type: 'number', description: '0 = unrestricted' },
-              memoryLimit: { type: 'string', description: 'e.g. 4g, 512m' },
-              networkMode: { type: 'string', enum: ['full', 'block', 'block-all', 'package-managers', 'custom'] },
-              allowedDomains: { type: 'array', items: { type: 'string' } },
-              includePackageManagerDomains: { type: 'boolean' },
-              dockerEnabled: { type: 'boolean' },
-              envVars: { type: 'string', description: 'Custom env vars as KEY=VALUE lines' },
-              setupScript: { type: 'string' },
+              name: { type: 'string', description: 'Display name' },
+              cpuLimit: { type: 'number', minimum: 0, description: 'CPU cores per worker (0 = unrestricted)' },
+              memoryLimit: { type: 'string', description: 'Memory per worker, e.g. 4g or 512m (empty = unrestricted)' },
+              networkMode: {
+                type: 'string',
+                enum: ['full', 'block', 'block-all', 'package-managers', 'custom'],
+                description: 'Outbound network policy: full (no restrictions), package-managers (package registries only), custom (allowedDomains, optionally plus package registries), block (agent API domains only), block-all (nothing). Agent API domains stay reachable in every mode except block-all.',
+              },
+              allowedDomains: { type: 'array', items: { type: 'string' }, description: 'Allowed domains for networkMode custom (wildcards like *.example.com allowed)' },
+              includePackageManagerDomains: { type: 'boolean', description: 'In custom mode, also allow the package-registry domains' },
+              dockerEnabled: { type: 'boolean', description: 'Run a Docker daemon inside the worker (Docker-in-Docker, privileged container)' },
+              envVars: { type: 'string', description: 'Extra environment variables as KEY=VALUE lines (override per-user account env vars)' },
+              setupScript: { type: 'string', description: 'Script run (as the agent user, sudo available) on every worker start, after repos are cloned and before the init script' },
               exposeApis: {
                 type: 'object',
+                description: 'Which orchestrator APIs workers may call from inside (and get skill docs for)',
                 properties: {
                   portMappings: { type: 'boolean' },
                   domainMappings: { type: 'boolean' },
                   usage: { type: 'boolean' },
                 },
               },
-              enabledCapabilityIds: { type: 'array', items: { type: 'string' }, nullable: true, description: 'null = all enabled' },
-              enabledInstructionIds: { type: 'array', items: { type: 'string' }, nullable: true, description: 'null = all enabled' },
-              builtIn: { type: 'boolean' },
-              userId: { type: 'string', nullable: true, description: 'null for built-in/global environments' },
-              createdAt: { type: 'string', format: 'date-time' },
-              updatedAt: { type: 'string', format: 'date-time' },
+              enabledCapabilityIds: { type: 'array', items: { type: 'string' }, nullable: true, description: 'Capability ids installed in workers (null = all, [] = none)' },
+              enabledInstructionIds: { type: 'array', items: { type: 'string' }, nullable: true, description: 'Instruction ids installed in workers (null = all, [] = none)' },
             },
+          },
+          Environment: {
+            type: 'object',
+            allOf: [
+              { $ref: '#/components/schemas/EnvironmentInput' },
+              {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  builtIn: { type: 'boolean', description: 'Platform-provided default environment; read-only' },
+                  userId: { type: 'string', nullable: true, description: 'Owner (null for built-in/global environments)' },
+                  createdAt: { type: 'string', format: 'date-time' },
+                  updatedAt: { type: 'string', format: 'date-time' },
+                },
+              },
+            ],
           },
         },
       },

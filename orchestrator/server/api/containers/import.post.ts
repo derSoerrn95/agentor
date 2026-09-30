@@ -5,6 +5,8 @@ defineRouteMeta({
     description:
       'Restores a worker from an export bundle as a brand-new worker (fresh UUID). The request body is the raw `.tar` bundle produced by the export endpoint (Content-Type `application/x-tar`). Recreates the environment, restores the workspace + agent-data volumes, imports any captured filesystem into a per-worker image, and recreates port/domain mappings (skipping conflicts). Pass `?displayName=` to override the restored worker\'s label.',
     operationId: 'importWorker',
+    // Multi-GB binary bundles do not fit through MCP tool arguments.
+    'x-mcp': false,
     parameters: [
       { name: 'displayName', in: 'query', required: false, schema: { type: 'string' }, description: 'Display name for the restored worker' },
     ],

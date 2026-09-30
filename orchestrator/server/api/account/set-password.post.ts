@@ -4,6 +4,8 @@ defineRouteMeta({
     summary: 'Set a password for the current user',
     description: 'Sets a password without requiring the current one. Used by users who created their account via passkey-only flow and want to add a password as a backup credential. The user must already be signed in.',
     operationId: 'setOwnPassword',
+    // Credential management stays with the signed-in human (lockout risk).
+    'x-mcp': false,
     requestBody: {
       required: true,
       content: {

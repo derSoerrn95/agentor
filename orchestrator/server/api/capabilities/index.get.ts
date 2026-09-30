@@ -20,16 +20,29 @@ defineRouteMeta({
     $global: {
       components: {
         schemas: {
+          CapabilityInput: {
+            type: 'object',
+            description: 'Skill document installed into the agent CLIs (Claude, Codex, Gemini) of workers whose environment enables it. Agent Skills format: markdown with YAML frontmatter (`name`, `description`, optional `license`, `compatibility`, `metadata`, `allowed-tools`).',
+            properties: {
+              name: { type: 'string', description: "Unique capability name (also the installed skill's directory name)" },
+              content: { type: 'string', description: 'Skill markdown including the YAML frontmatter' },
+            },
+          },
           Capability: {
             type: 'object',
-            properties: {
-              id: { type: 'string' },
-              name: { type: 'string' },
-              content: { type: 'string' },
-              builtIn: { type: 'boolean' },
-              createdAt: { type: 'string', format: 'date-time' },
-              updatedAt: { type: 'string', format: 'date-time' },
-            },
+            allOf: [
+              { $ref: '#/components/schemas/CapabilityInput' },
+              {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  builtIn: { type: 'boolean', description: 'Platform-provided; read-only' },
+                  userId: { type: 'string', nullable: true, description: 'Owner (null for built-ins)' },
+                  createdAt: { type: 'string', format: 'date-time' },
+                  updatedAt: { type: 'string', format: 'date-time' },
+                },
+              },
+            ],
           },
         },
       },

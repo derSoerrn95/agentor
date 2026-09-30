@@ -3,6 +3,7 @@ defineRouteMeta({
     tags: ['Logs'],
     summary: 'List known log sources',
     operationId: 'getLogSources',
+    'x-admin-only': true,
     responses: {
       200: { description: 'Log source list', content: { 'application/json': { schema: { type: 'object', properties: { sources: { type: 'array' } } } } } },
     },

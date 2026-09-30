@@ -1,6 +1,10 @@
 import { betterAuth } from 'better-auth';
-import { admin } from 'better-auth/plugins';
+import { admin, jwt } from 'better-auth/plugins';
+import { createAuthMiddleware } from 'better-auth/api';
 import { passkey } from '@better-auth/passkey';
+import { mcp } from '@better-auth/mcp';
+import { cimd } from '@better-auth/cimd';
+import { fetchClientMetadataResource } from '@better-auth/cimd/node';
 import { getMigrations } from 'better-auth/db/migration';
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
@@ -48,7 +52,7 @@ function resolveAuthSecret(config: ReturnType<typeof loadConfig>): string {
  *   1. Direct dev access: `http://localhost:3000`, `http://127.0.0.1:3000`
  *   2. The dashboard URL when Traefik domain routing is configured
  *      (`DASHBOARD_SUBDOMAIN.DASHBOARD_BASE_DOMAIN`, both http and https variants)
- *   3. `BETTER_AUTH_URL` if set
+ *   3. The public base URL (`BETTER_AUTH_URL`, else the dashboard URL)
  *   4. Any extra origins from `BETTER_AUTH_TRUSTED_ORIGINS` (comma-separated)
  */
 function buildTrustedOrigins(config: ReturnType<typeof loadConfig>): string[] {
@@ -57,9 +61,8 @@ function buildTrustedOrigins(config: ReturnType<typeof loadConfig>): string[] {
     'http://127.0.0.1:3000',
   ]);
 
-  if (config.betterAuthUrl) {
-    origins.add(config.betterAuthUrl);
-  }
+  // BETTER_AUTH_URL, or the auto-derived dashboard URL when unset.
+  origins.add(config.publicBaseUrl);
 
   if (config.dashboardSubdomain && config.dashboardBaseDomain) {
     const host = `${config.dashboardSubdomain}.${config.dashboardBaseDomain}`;
@@ -115,6 +118,71 @@ function resolvePasskeyConfig(config: ReturnType<typeof loadConfig>): PasskeyCon
   return { enabled: true, rpID, origin };
 }
 
+/** Path of the MCP endpoint (Streamable HTTP), relative to the public base URL. */
+export const MCP_PATH = '/mcp';
+/** The single OAuth scope that grants an MCP client full access to the
+ * authorizing user's Agentor account (the same rights the user has in the
+ * dashboard). Finer-grained scopes can be added to `scopes` later. */
+export const MCP_SCOPE = 'agentor';
+/** Scopes every MCP access token must carry. */
+export const MCP_REQUIRED_SCOPES = [MCP_SCOPE] as const;
+const OAUTH_SCOPES = ['openid', 'profile', 'email', 'offline_access', MCP_SCOPE];
+
+export interface McpAuthConfig {
+  enabled: boolean;
+  /** Canonical protected-resource URL (`<publicBaseUrl>/mcp`); the `aud` of every MCP access token. */
+  resource?: string;
+  /** Why MCP is disabled (surfaced in logs and settings). */
+  disabledReason?: string;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '[::1]' || /^127(\.\d{1,3}){3}$/.test(hostname);
+}
+
+/**
+ * Decides whether the MCP server (and its OAuth 2.1 authorization server) is
+ * enabled, and under which resource URL. MCP requires the resource URL to be
+ * HTTPS — plain HTTP is only accepted on loopback hosts for local development —
+ * so an http dashboard domain disables MCP instead of failing auth init.
+ */
+export function resolveMcpConfig(config: ReturnType<typeof loadConfig>): McpAuthConfig {
+  if (!config.mcpEnabled) return { enabled: false, disabledReason: 'MCP_ENABLED=false' };
+  const resource = `${config.publicBaseUrl}${MCP_PATH}`;
+  const url = new URL(resource);
+  if (url.protocol !== 'https:' && !isLoopbackHost(url.hostname)) {
+    return {
+      enabled: false,
+      disabledReason: `MCP requires an https public URL (got ${config.publicBaseUrl}); set BETTER_AUTH_URL to the https dashboard URL`,
+    };
+  }
+  return { enabled: true, resource };
+}
+
+const LOOPBACK_REDIRECT_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * RFC 8252 §7.3: a client whose redirect URIs are all http loopback URIs is a
+ * native app. OIDC dynamic registration defaults `application_type` to `web`,
+ * which forbids loopback redirects — so the MCP clients that register without
+ * an `application_type` (the MCP Inspector, IDE agents, …) would be rejected.
+ * Classify them as native instead; explicit values are left untouched.
+ */
+function defaultLoopbackClientsToNative(body: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!body || body.application_type !== undefined) return undefined;
+  const uris = body.redirect_uris;
+  if (!Array.isArray(uris) || uris.length === 0) return undefined;
+  const allLoopback = uris.every((uri) => {
+    try {
+      const url = new URL(String(uri));
+      return url.protocol === 'http:' && LOOPBACK_REDIRECT_HOSTS.has(url.hostname);
+    } catch {
+      return false;
+    }
+  });
+  return allLoopback ? { ...body, application_type: 'native' } : undefined;
+}
+
 function buildAuth(): any {
   const config = loadConfig();
   const dbPath = join(config.dataDir, 'auth.db');
@@ -128,18 +196,29 @@ function buildAuth(): any {
   db.pragma('busy_timeout = 5000');
   _db = db;
 
-  const baseURL = config.betterAuthUrl || 'http://localhost:3000';
+  const baseURL = config.publicBaseUrl;
   const passkeyCfg = resolvePasskeyConfig(config);
+  const mcpCfg = resolveMcpConfig(config);
 
   return betterAuth({
     database: db,
     basePath: '/api/auth',
     baseURL,
+    // The jwt plugin's `/token` endpoint mints a JWT from a *session*; with the
+    // OAuth provider enabled, access tokens must only come from `/oauth2/token`.
+    disabledPaths: ['/token'],
     secret: resolveAuthSecret(config),
     trustedOrigins: buildTrustedOrigins(config),
     emailAndPassword: {
       enabled: true,
       autoSignIn: true,
+    },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== '/oauth2/register') return;
+        const body = defaultLoopbackClientsToNative(ctx.body);
+        if (body) return { context: { body } };
+      }),
     },
     user: {
       // Allow users to change their own email without email verification.
@@ -174,6 +253,32 @@ function buildAuth(): any {
     },
     plugins: [
       admin(),
+      ...(mcpCfg.enabled
+        ? [
+            // Signs the OAuth access tokens (JWTs bound to the MCP resource)
+            // and serves the JWKS the MCP endpoint verifies them against.
+            jwt(),
+            // OAuth 2.1 authorization server for MCP clients: discovery
+            // metadata (RFC 8414 / RFC 9728), authorization code + PKCE,
+            // refresh tokens, consent. Users sign in on the regular /login page
+            // and approve the client on /oauth/consent.
+            mcp({
+              resource: mcpCfg.resource!,
+              loginPage: '/login',
+              consentPage: '/oauth/consent',
+              scopes: OAUTH_SCOPES,
+              clientRegistrationDefaultScopes: OAUTH_SCOPES,
+              // Dynamic Client Registration is still how most MCP clients
+              // onboard; CIMD (below) covers the MCP 2026-07-28 profile.
+              allowDynamicClientRegistration: true,
+              allowUnauthenticatedClientRegistration: true,
+            }),
+            cimd({
+              fetchClientMetadataResource,
+              metadataProfile: 'mcp-2026-07-28',
+            }),
+          ]
+        : []),
       ...(passkeyCfg.enabled
         ? [
             passkey({
@@ -234,6 +339,11 @@ function buildAuth(): any {
   });
 }
 
+/** Returns the resolved MCP / OAuth configuration (see `resolveMcpConfig`). */
+export function getMcpAuthConfig(): McpAuthConfig {
+  return resolveMcpConfig(loadConfig());
+}
+
 /** Returns whether passkey authentication is enabled (dashboard is on Traefik). */
 export function isPasskeyEnabled(): boolean {
   return resolvePasskeyConfig(loadConfig()).enabled;
@@ -250,8 +360,24 @@ export function useAuth(): any {
  */
 export async function migrateAuth(): Promise<void> {
   const auth = useAuth();
-  const migrations = await getMigrations(auth.options);
+  const migrations = await getMigrations({ ...auth.options, logger: { log: logMigrationMessage } });
   await migrations.runMigrations();
+}
+
+/**
+ * better-auth's migrator creates `string[]` columns (OAuth scopes, redirect
+ * URIs, …) as `TEXT` on SQLite, then its own drift check expects a JSON type
+ * and warns on every startup. That self-contradiction is dropped; every other
+ * migration message is printed as better-auth would.
+ */
+const SQLITE_ARRAY_TYPE_DRIFT_RE = /^Field \w+ in table \w+ has a different type in the database\. Expected (string|number)\[\] but got TEXT\.$/i;
+
+function logMigrationMessage(level: string, message: string, ...args: unknown[]): void {
+  if (SQLITE_ARRAY_TYPE_DRIFT_RE.test(message)) return;
+  const line = `[Better Auth]: ${message}`;
+  if (level === 'error') console.error(line, ...args);
+  else if (level === 'warn') console.warn(line, ...args);
+  else console.log(line, ...args);
 }
 
 export function getAuthDb(): Database.Database {

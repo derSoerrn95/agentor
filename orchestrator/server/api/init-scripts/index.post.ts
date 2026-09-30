@@ -6,7 +6,7 @@ defineRouteMeta({
     operationId: 'createInitScript',
     requestBody: {
       required: true,
-      content: { 'application/json': { schema: { $ref: '#/components/schemas/InitScript' } } },
+      content: { 'application/json': { schema: { type: 'object', allOf: [{ $ref: '#/components/schemas/InitScriptInput' }], required: ['name', 'content'] } } },
     },
     responses: {
       201: { description: 'Created init script', content: { 'application/json': { schema: { $ref: '#/components/schemas/InitScript' } } } },

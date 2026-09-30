@@ -1,6 +1,7 @@
 import type { H3Event } from 'h3';
-import { createError } from 'h3';
+import { createError, getHeader } from 'h3';
 import { useAuth } from './auth';
+import { INTERNAL_AUTH_HEADER, consumeInternalAuthToken } from './internal-auth';
 import { useContainerManager } from './services';
 import type { ContainerInfo } from '../../shared/types';
 
@@ -11,7 +12,9 @@ export interface AuthContext {
     name: string;
     role?: string | null;
   };
-  session: {
+  /** The browser session. Absent for MCP callers, which authenticate with an
+   * OAuth access token instead (see `internal-auth.ts`). */
+  session?: {
     id: string;
     token: string;
     userId: string;
@@ -132,12 +135,16 @@ function toAuthContext(session: any): AuthContext | null {
 }
 
 /**
- * Loads the auth context directly from an h3 event. Used by routes outside
- * `/api/` that are not covered by the global auth middleware (e.g. the
- * `/editor/*` and `/desktop/*` reverse proxies). Returns null on any error
- * or missing session — the caller decides whether to throw 401.
+ * Loads the auth context directly from an h3 event: a single-use internal
+ * capability (MCP tool calls re-dispatched to REST routes) or the browser
+ * session cookie. Used by the global `/api/` auth middleware and by routes
+ * outside `/api/` (e.g. the `/editor/*` and `/desktop/*` reverse proxies).
+ * Returns null on any error or missing session — the caller decides whether
+ * to throw 401.
  */
 export async function resolveAuthFromEvent(event: H3Event): Promise<AuthContext | null> {
+  const internal = consumeInternalAuthToken(getHeader(event, INTERNAL_AUTH_HEADER));
+  if (internal) return internal;
   try {
     const auth = useAuth();
     const session: any = await auth.api.getSession({ headers: event.headers });

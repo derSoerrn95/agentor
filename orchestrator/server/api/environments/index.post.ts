@@ -6,7 +6,7 @@ defineRouteMeta({
     operationId: 'createEnvironment',
     requestBody: {
       required: true,
-      content: { 'application/json': { schema: { $ref: '#/components/schemas/Environment' } } },
+      content: { 'application/json': { schema: { type: 'object', allOf: [{ $ref: '#/components/schemas/EnvironmentInput' }], required: ['name'] } } },
     },
     responses: {
       201: { description: 'Created environment', content: { 'application/json': { schema: { $ref: '#/components/schemas/Environment' } } } },
