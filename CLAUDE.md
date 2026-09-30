@@ -45,7 +45,7 @@ Three managed containers:
 - Framework: Nuxt 3 (SPA mode), Nitro server, Vue 3
 - UI: Nuxt UI v3, Tailwind CSS v4
 - Terminal: xterm.js 5 (@xterm/xterm + @xterm/addon-fit)
-- Auth: better-auth 1.6 + admin plugin (user management, RBAC) + @better-auth/passkey (WebAuthn passwordless), better-sqlite3 (SQLite database for users/sessions/passkeys)
+- Auth: better-auth 1.7 + admin plugin (user management, RBAC) + @better-auth/passkey (WebAuthn passwordless), better-sqlite3 (SQLite database for users/sessions/passkeys)
 - Backend: dockerode 4, nanoid 5, crossws (WebSocket, bundled with Nitro), ws (WebSocket client for noVNC proxy), tar-stream (archive packing)
 - Workers: Ubuntu 24.04, agent CLI (varies), tmux, git, Docker CE (opt-in DinD), Xvfb, fluxbox, x11vnc, noVNC (port 6080), code-server (port 8443), VS Code CLI (tunnel), Chromium, microsocks, dnsmasq, ipset, iptables
 
@@ -110,6 +110,7 @@ See @docs/testing.md for full details (writing tests, conventions, helpers, debu
 
 ## Gotchas
 
+- **`orchestrator/.npmrc` sets `legacy-peer-deps=true`** — better-auth 1.7 lists framework integrations (e.g. `@sveltejs/kit`) as optional peers and npm's resolver wrongly turns their vite 8 peer into a conflict with Nuxt's vite 7. The Dockerfile copies `.npmrc` before `npm ci`
 - **crossws `peer.ctx` is undefined** in Nitro's bundled crossws — store per-connection state in a `Map<string, Context>` keyed by `peer.id`, not on `peer.ctx`
 - **crossws `close` event does not fire reliably** in Nitro's dev mode — detect disconnected peers via `peer.send()` failure in the data handler instead of relying on the `close` callback
 - **Iframes and xterm steal mouse events** during split pane / tab drag — apply `pointer-events: none` via a body class (`body.tab-dragging iframe, body.tab-dragging .xterm`)
