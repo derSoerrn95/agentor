@@ -1,5 +1,6 @@
-import { createError, getRequestURL } from 'h3';
+import { createError, getHeader, getRequestURL } from 'h3';
 import { resolveAuthFromEvent } from '../utils/auth-helpers';
+import { useAuth } from '../utils/auth';
 
 /**
  * Public API prefixes that bypass session auth:
@@ -23,6 +24,8 @@ function isPublicApi(path: string): boolean {
   return PUBLIC_API_PREFIXES.some((p) => path === p || path.startsWith(p));
 }
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 export default defineEventHandler(async (event) => {
   const path = getRequestURL(event).pathname;
 
@@ -34,6 +37,16 @@ export default defineEventHandler(async (event) => {
   const ctx = await resolveAuthFromEvent(event);
   if (!ctx) {
     throw createError({ statusCode: 401, statusMessage: 'Unauthorized' });
+  }
+  // CSRF: the session cookie is SameSite=Lax, which still lets same-site
+  // pages (e.g. a worker's domain mapping on the dashboard's base domain)
+  // submit forms to the API. State-changing cookie-authenticated requests must
+  // come from a trusted origin, like better-auth's own endpoints.
+  if (!SAFE_METHODS.has(event.method)) {
+    const origin = getHeader(event, 'origin');
+    if (!origin || !(await useAuth().$context).isTrustedOrigin(origin)) {
+      throw createError({ statusCode: 403, statusMessage: 'Forbidden: untrusted request origin' });
+    }
   }
   (event.context as any).auth = ctx;
 });

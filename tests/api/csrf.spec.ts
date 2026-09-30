@@ -106,4 +106,35 @@ test.describe('CSRF / Origin enforcement', () => {
     });
     expect(res.status).toBe(403);
   });
+
+  test.describe('Agentor API (cookie-authenticated mutations)', () => {
+    // A cross-site form post: urlencoded body, no preflight, SameSite=Lax cookie attached.
+    const formPost = (origin?: string) => fetch(`${BASE_URL}/api/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Cookie: adminCookieHeader(),
+        ...(origin ? { Origin: origin } : {}),
+      },
+      // No name → a trusted request fails validation (400) instead of creating a user.
+      body: 'email=csrf-probe%40test.example&password=csrf-probe-pass-1&role=admin',
+    });
+
+    test('rejects an untrusted Origin with 403', async () => {
+      expect((await formPost('https://evil.example')).status).toBe(403);
+    });
+
+    test('rejects a missing Origin with 403', async () => {
+      expect((await formPost()).status).toBe(403);
+    });
+
+    test('accepts the trusted Origin', async () => {
+      expect((await formPost(BASE_URL)).status).toBe(400);
+    });
+
+    test('safe methods need no Origin', async () => {
+      const res = await fetch(`${BASE_URL}/api/users`, { headers: { Cookie: adminCookieHeader() } });
+      expect(res.status).toBe(200);
+    });
+  });
 });

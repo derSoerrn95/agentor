@@ -4,7 +4,7 @@ Comprehensive end-to-end test suite for the Agentor platform using Playwright an
 
 ## Overview
 
-- **~1418 tests** across 106 test files (~875 API + ~543 UI)
+- **~1422 tests** across 106 test files (~879 API + ~543 UI)
 - **API tests**: headless, no browser needed, fast execution
 - **UI tests**: Desktop Chrome (1920x1080), real browser interactions
 - **Terminal tests**: WebSocket-based command execution and agent CLI prompting
@@ -98,13 +98,13 @@ tests/
     worker-lifecycle.ts    # Container create/cleanup utilities
     ui-helpers.ts          # Page navigation and interaction helpers
     terminal-ws.ts         # WebSocket terminal client + ANSI stripping + credential checks
-  api/                     # API endpoint tests (~875 tests across 62 files)
+  api/                     # API endpoint tests (~879 tests across 62 files)
   ui/                      # UI interaction tests (~543 tests across 44 files)
 ```
 
 ## Test Categories
 
-### API Tests (~875 tests, 62 files)
+### API Tests (~879 tests, 62 files)
 
 | File | Tests | Coverage |
 |------|-------|----------|
@@ -114,7 +114,7 @@ tests/
 | `account.spec.ts` | 5 | User changes own password (old fails, new works), change-password rejects wrong current password, user changes own email, user updates own name, admin resets another user's password via `/api/auth/admin/set-user-password` |
 | `account-extended.spec.ts` | 7 | set-password rejects short/missing passwords, set-password requires auth, set-password returns 400 when password already exists, change-password rejects wrong current, remove-password idempotent 409, credentials endpoint shape |
 | `passkey.spec.ts` | 7 | Credential summary endpoint requires auth, admin/user credential summary shape, remove-password rejected when no passkey, remove-password requires auth, passkey-token endpoint 409 when users exist, validation gating |
-| `csrf.spec.ts` | 4 | Sign-in without Origin header rejected (403), sign-in with trusted Origin accepted, change-password without Origin rejected (even with valid session), sign-up Origin enforcement |
+| `csrf.spec.ts` | 9 | Sign-in without Origin header rejected (403), sign-in with trusted Origin accepted, change-password without Origin rejected (even with valid session), sign-up Origin enforcement; Agentor API: a cookie-authenticated urlencoded POST (cross-site form shape) is rejected with 403 from an untrusted or missing Origin and accepted from the trusted one; safe methods need no Origin |
 | `sessions.spec.ts` | 6 | Sign-in returns user metadata with role, get-session without cookie returns null, multiple sessions for same user coexist, sign-out scoped to single context, admin session reports admin role, sign-in with nonexistent email fails |
 | `admin-users.spec.ts` | 10 | Admin lists users via admin plugin, regular user cannot list users, admin creates user (with / without password), admin promotes + demotes user, admin removes user, admin sets user password, regular user cannot create users or reset passwords, duplicate email rejected |
 | `admin-endpoints.spec.ts` | 6 | /api/settings, /api/logs (GET+DELETE), /api/updates/apply, /api/updates/check, /api/updates/prune — each verified as admin-only (401 unauth, 403 user, 200 admin) |

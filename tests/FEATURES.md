@@ -86,6 +86,10 @@ Every user-facing feature of the Agentor web dashboard, organized by category. T
 ### 0.11 Layered Auth
 - Traefik dashboard basic auth (`DASHBOARD_AUTH_USER`/`PASSWORD`) still works as an additional layer in front of the orchestrator; user auth is independent
 
+### 0.11a CSRF / Origin enforcement
+- better-auth's `/api/auth/*` endpoints reject mutating requests without a trusted `Origin`
+- Every other `/api/*` request that changes state (anything but GET / HEAD / OPTIONS) and is authenticated by the session cookie must carry an `Origin` from the trusted-origins list; otherwise 403 `Forbidden: untrusted request origin`. This stops same-site pages (e.g. a worker's domain mapping on the dashboard's base domain) from submitting forms to the API with the SameSite=Lax cookie. Worker-self routes (no cookie) are unaffected
+
 ### 0.12 Passkey (WebAuthn) Authentication
 - **Conditional enablement**: Passkeys are only available when the dashboard is served over Traefik with both `DASHBOARD_SUBDOMAIN` and `DASHBOARD_BASE_DOMAIN` set. When disabled, the passkey plugin is not registered at all and every passkey UI element is hidden via the `passkeysEnabled` flag on `GET /api/setup/status`. WebAuthn config (when enabled): `rpID = <subdomain>.<base>` (override with `BETTER_AUTH_RP_ID`), `origin = https://<subdomain>.<base>`, `rpName = 'Agentor'`. Users must access the dashboard via the Traefik URL for passkey flows to work.
 - **Setup page** has a Password / Passkey toggle (only shown when passkeys are enabled). The Passkey path creates the initial admin via `POST /api/setup/create-admin-passkey-token` and `client.passkey.addPasskey({ context: token })` — no password required.

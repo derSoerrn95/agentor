@@ -54,7 +54,7 @@ Application data remains in JSON files (via `JsonStore`) — we only use SQLite 
 |-----------|------|---------|
 | Auth instance | `orchestrator/server/utils/auth.ts` | `betterAuth()` configuration with admin plugin, session config, and migration runner |
 | Auth handler | `orchestrator/server/api/auth/[...all].ts` | Catch-all that forwards `/api/auth/*` to `auth.handler()` |
-| Middleware | `orchestrator/server/middleware/auth.ts` | Global Nitro middleware that extracts the session on every `/api/*` request and populates `event.context.auth`. Skips `/api/auth/**`, `/api/health`, `/api/setup/**`, `/api/docs`, and `/api/worker-self/**`. |
+| Middleware | `orchestrator/server/middleware/auth.ts` | Global Nitro middleware that extracts the session on every `/api/*` request, enforces a trusted `Origin` on cookie-authenticated mutations (CSRF), and populates `event.context.auth`. Skips `/api/auth/**`, `/api/health`, `/api/setup/**`, `/api/docs`, and `/api/worker-self/**`. |
 | Helpers | `orchestrator/server/utils/auth-helpers.ts` | `requireAuth(event)`, `requireAdmin(event)`, `requireContainerAccess(event, container)`, `requireRunningContainerAccess(...)`, `canAccessResource(...)`, `authenticateWsPeer(peer)` |
 | User admin | `orchestrator/server/utils/user-admin.ts` | `/api/users` + `/api/account` logic on better-auth's server API / internal adapter (list, create, update name/email/role, set password, delete + immediate orphan sweep) |
 | Worker auth | `orchestrator/server/utils/worker-auth.ts` | `requireWorkerSelf(event)` — identifies the calling worker by source IP on the `agentor-net` Docker bridge network. Used by every `/api/worker-self/*` route in place of session auth. |
@@ -246,7 +246,7 @@ Tests live in `tests/ui/passkey-management.spec.ts` and `tests/api/passkey.spec.
 
 ## Trusted Origins & CSRF
 
-better-auth rejects any POST to `/api/auth/*` without an `Origin` or `Referer` header, and rejects requests whose origin isn't in `trustedOrigins` — this is its CSRF protection. The trusted list is built automatically on startup:
+better-auth rejects any POST to `/api/auth/*` without an `Origin` or `Referer` header, and rejects requests whose origin isn't in `trustedOrigins` — this is its CSRF protection. Agentor's global `/api` middleware (`server/middleware/auth.ts`) applies the same rule to every other cookie-authenticated, state-changing request (not GET/HEAD/OPTIONS): the `Origin` header must be present and pass `isTrustedOrigin`, otherwise 403. The session cookie is SameSite=Lax, which does not stop same-site pages — such as a worker's domain mapping served on the dashboard's base domain — from posting forms. The trusted list is built automatically on startup:
 
 1. `http://localhost:3000` + `http://127.0.0.1:3000` (direct dev access)
 2. `BETTER_AUTH_URL` if set
