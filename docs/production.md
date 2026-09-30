@@ -42,8 +42,9 @@ dispatch (Actions → Refresh Docker Images → Run workflow):
 3. **Smoke-test on amd64 and arm64.** The worker image must report versions for
    `claude`, `codex`, `gemini`, node, npm, git, tmux, chromium and code-server,
    and carry the expected binaries (`gh`, `code`, `docker`, `dnsmasq`,
-   `microsocks`, `x11vnc`, `Xvfb`, `sshd`). The orchestrator image must boot
-   against a Docker socket and answer `GET /api/health` with `status: ok`.
+   `microsocks`, `x11vnc`, `Xvfb`, `maim`, `xdotool`, `sshd`). The orchestrator
+   image must boot against a Docker socket and answer `GET /api/health` with
+   `status: ok`.
 4. **Promote to `latest` + `main`** by retagging the verified manifest (no
    layers re-uploaded).
 

@@ -1,4 +1,5 @@
 import Docker from 'dockerode';
+import { Writable } from 'node:stream';
 import type { Duplex } from 'node:stream';
 import type { Config } from './config';
 import { getAppType } from './apps';
@@ -13,6 +14,16 @@ export interface EnvironmentJsonPayload {
   setupScript: string;
   envVars: string;
   exposeApis: ExposeApis;
+}
+
+/** Result of `DockerService.execCapture`. `exitCode` is -1 when the host-side
+ * timeout fired before the command exited. */
+export interface ExecCaptureResult {
+  exitCode: number;
+  stdout: Buffer;
+  stderr: Buffer;
+  truncated: boolean;
+  timedOut: boolean;
 }
 
 export interface CapabilityJsonEntry {
@@ -69,6 +80,8 @@ export interface RawContainerStats {
 }
 
 const MANAGED_LABEL = 'agentor.managed';
+const EXEC_EXIT_POLL_ATTEMPTS = 40;
+const EXEC_EXIT_POLL_MS = 50;
 /** The worker's UUID `id` — the only identifying label on a worker container.
  * Owner + config live in the WorkerStore record, not in labels. */
 const ID_LABEL = 'agentor.id';
@@ -324,6 +337,95 @@ export class DockerService {
     await this.streamToString(stream);
   }
 
+  /** Run a command in a container (non-TTY) and capture stdout / stderr
+   * separately as buffers, each capped at `maxOutputBytes` (the rest is
+   * drained and dropped; `truncated` reports it). `timeoutMs` is a host-side
+   * safety net — callers bound runtime inside the container (e.g. coreutils
+   * `timeout`), this only guarantees the request never hangs. */
+  async execCapture(
+    containerId: string,
+    cmd: string[],
+    opts: {
+      user?: string;
+      workingDir?: string;
+      env?: string[];
+      maxOutputBytes?: number;
+      timeoutMs?: number;
+    } = {},
+  ): Promise<ExecCaptureResult> {
+    const maxOutputBytes = opts.maxOutputBytes ?? 1024 * 1024;
+    const container = this.docker.getContainer(containerId);
+    const exec = await container.exec({
+      Cmd: cmd,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+      User: opts.user,
+      WorkingDir: opts.workingDir,
+      Env: opts.env,
+    });
+    const stream = (await exec.start({ Detach: false, Tty: false })) as Duplex;
+
+    let truncated = false;
+    const collector = () => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      const writable = new Writable({
+        write(chunk: Buffer, _enc, done) {
+          if (size < maxOutputBytes) {
+            const keep = chunk.subarray(0, maxOutputBytes - size);
+            chunks.push(keep);
+            size += keep.length;
+            if (keep.length < chunk.length) truncated = true;
+          } else {
+            truncated = true;
+          }
+          done();
+        },
+      });
+      return { writable, read: () => Buffer.concat(chunks) };
+    };
+    const stdout = collector();
+    const stderr = collector();
+    this.docker.modem.demuxStream(stream, stdout.writable, stderr.writable);
+
+    let timedOut = false;
+    await new Promise<void>((resolve, reject) => {
+      const timer = opts.timeoutMs
+        ? setTimeout(() => {
+          timedOut = true;
+          stream.destroy();
+          resolve();
+        }, opts.timeoutMs)
+        : undefined;
+      const finish = () => {
+        if (timer) clearTimeout(timer);
+        resolve();
+      };
+      stream.on('end', finish);
+      stream.on('close', finish);
+      stream.on('error', (err) => {
+        if (timer) clearTimeout(timer);
+        if (timedOut) resolve();
+        else reject(err);
+      });
+    });
+
+    // The output stream can end a moment before Docker records the exit code.
+    let info = await exec.inspect();
+    for (let attempt = 0; !timedOut && info.Running && attempt < EXEC_EXIT_POLL_ATTEMPTS; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, EXEC_EXIT_POLL_MS));
+      info = await exec.inspect();
+    }
+    return {
+      exitCode: timedOut || info.ExitCode == null ? -1 : info.ExitCode,
+      stdout: stdout.read(),
+      stderr: stderr.read(),
+      truncated,
+      timedOut,
+    };
+  }
+
   async execListTmuxWindows(containerId: string): Promise<TmuxWindow[]> {
     const container = this.docker.getContainer(containerId);
     const exec = await container.exec({
@@ -493,11 +595,6 @@ export class DockerService {
   async putWorkspaceArchive(containerId: string, tarBuffer: Buffer): Promise<void> {
     const container = this.docker.getContainer(containerId);
     await container.putArchive(tarBuffer, { path: '/workspace' });
-  }
-
-  async getWorkspaceArchive(containerId: string): Promise<NodeJS.ReadableStream> {
-    const container = this.docker.getContainer(containerId);
-    return container.getArchive({ path: '/workspace' });
   }
 
   // --- Generic archive + export/import (worker export/import) ---

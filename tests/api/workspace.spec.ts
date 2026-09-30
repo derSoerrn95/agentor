@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { gunzipSync } from 'node:zlib';
 import { ApiClient } from '../helpers/api-client';
 import { createWorker, cleanupWorker } from '../helpers/worker-lifecycle';
 
@@ -84,6 +85,32 @@ test.describe('Workspace API', () => {
     });
   });
 
+  test.describe('POST /api/containers/:id/workspace (JSON body)', () => {
+    test('writes UTF-8 and base64 files (relative or absolute inside /workspace), creating directories', async ({ request }) => {
+      const api = new ApiClient(request);
+      const { status, body } = await api.uploadWorkspaceJson(containerId, [
+        { path: 'json-upload/readme.md', content: '# héllo\n' },
+        { path: '/workspace/json-upload/bin/data.bin', content: Buffer.from([0, 255, 7]).toString('base64'), encoding: 'base64' },
+      ]);
+      expect(status).toBe(200);
+      expect(body).toEqual({ uploaded: 2 });
+      const check = await api.execCommand(containerId, {
+        command: 'cat json-upload/readme.md; od -An -tu1 json-upload/bin/data.bin | tr -s " "; stat -c %U json-upload/readme.md',
+      });
+      expect(check.body.stdout).toBe('# héllo\n 0 255 7\nagent\n');
+    });
+
+    test('rejects traversal and malformed bodies', async ({ request }) => {
+      const api = new ApiClient(request);
+      expect((await api.uploadWorkspaceJson(containerId, [{ path: '../escape.txt', content: 'x' }])).status).toBe(400);
+      expect((await api.uploadWorkspaceJson(containerId, [{ path: '/etc/escape.txt', content: 'x' }])).status).toBe(400);
+      expect((await api.uploadWorkspaceJson(containerId, [{ path: 'ok.txt', content: 'x', encoding: 'hex' as 'utf8' }])).status).toBe(400);
+      expect((await api.uploadWorkspaceJson(containerId, [])).status).toBe(400);
+      const res = await request.post(`/api/containers/${containerId}/workspace`, { data: { files: 'nope' } });
+      expect(res.status()).toBe(400);
+    });
+  });
+
   test.describe('GET /api/containers/:id/workspace (download)', () => {
     test('downloads workspace as tar.gz', async ({ request }) => {
       const api = new ApiClient(request);
@@ -98,6 +125,35 @@ test.describe('Workspace API', () => {
       const api = new ApiClient(request);
       const { status } = await api.downloadWorkspace('non-existent-id');
       expect(status).toBe(404);
+    });
+
+    test('downloads a sub-directory or single file', async ({ request }) => {
+      const api = new ApiClient(request);
+      await api.uploadWorkspaceJson(containerId, [
+        { path: 'dl/one.txt', content: 'first file' },
+        { path: 'dl/two.txt', content: 'second file' },
+      ]);
+
+      const dir = await api.downloadWorkspace(containerId, 'dl');
+      expect(dir.status).toBe(200);
+      expect(dir.headers['content-disposition']).toContain('-dl.tar.gz');
+      const dirTar = gunzipSync(dir.body).toString('latin1');
+      expect(dirTar).toContain('dl/one.txt');
+      expect(dirTar).toContain('second file');
+
+      const file = await api.downloadWorkspace(containerId, '/workspace/dl/one.txt');
+      expect(file.status).toBe(200);
+      const fileTar = gunzipSync(file.body).toString('latin1');
+      expect(fileTar).toContain('one.txt');
+      expect(fileTar).toContain('first file');
+      expect(fileTar).not.toContain('second file');
+    });
+
+    test('rejects paths outside the workspace and 404s missing ones', async ({ request }) => {
+      const api = new ApiClient(request);
+      expect((await api.downloadWorkspace(containerId, '../etc')).status).toBe(400);
+      expect((await api.downloadWorkspace(containerId, '/etc/passwd')).status).toBe(400);
+      expect((await api.downloadWorkspace(containerId, 'does/not/exist')).status).toBe(404);
     });
   });
 });

@@ -56,6 +56,7 @@ Every user-facing feature of the Agentor web dashboard, organized by category. T
 - Create user form (name, email, password, role)
 - Change role action (promote to admin / demote to user)
 - Delete user action (with confirmation)
+- Backed by the `/api/users` REST API (§24.19); errors (e.g. duplicate email, demoting yourself) are shown in the modal
 
 ### 0.9 Account Card
 - Sidebar footer (pinned to bottom, always visible across tabs) shows the current user's avatar, name, email, admin badge, and a Sign out icon button
@@ -75,7 +76,7 @@ Every user-facing feature of the Agentor web dashboard, organized by category. T
 - Backed by `/api/auth/update-user`, `/api/auth/change-email`, `/api/auth/change-password` (built-in better-auth) and Agentor's per-user `/api/account/env-vars`, `/api/account/ssh-key`, and `/api/account/agent-credentials` endpoints
 
 ### 0.9c Admin Password Reset
-- In the Users modal each row has a "Reset password" button that prompts for a new password and calls `/api/auth/admin/set-user-password`
+- In the Users modal each row except your own has a "Reset password" button that prompts for a new password and calls `PUT /api/users/:id/password`
 - No current password required — only admins can invoke this endpoint
 
 ### 0.10 WebSocket Authentication
@@ -766,8 +767,11 @@ Every pane type supports **multiple simultaneous instances**. Clicking the Termi
 - `POST /api/containers/:id/archive` — archive (port/domain mappings are preserved and reattach to the new container on unarchive via the stable `containerName`)
 - Port and domain mappings survive stop/restart, archive/unarchive, and rebuild — they are keyed by the globally unique `containerName` which is stable across the worker's whole lifecycle. Traefik routes to the container by DNS name, so lookups pick up the new container after rebuild/unarchive without any mapping changes. Mappings are only removed on permanent delete (`DELETE /api/containers/:id` or `DELETE /api/archived/:id`).
 - `GET /api/containers/:id/logs` — logs with optional ?tail=N (default 200, max 10000)
-- `GET /api/containers/:id/workspace` — download workspace .tar.gz
-- `POST /api/containers/:id/workspace` — upload files (multipart, path traversal protection)
+- `GET /api/containers/:id/workspace` — download workspace .tar.gz; optional `?path=` downloads a file or sub-directory (relative to, or absolute inside, `/workspace`; filename `<displayName>-<basename>.tar.gz`). Paths escaping `/workspace` → 400, missing paths → 404. An abandoned download (client disconnects) ends Docker's archive stream, so the worker is not left locked
+- `POST /api/containers/:id/workspace` — upload files: multipart (each part's filename is its path under `/workspace`) or JSON `{ files: [{ path, content, encoding: 'utf8' | 'base64' }] }`. Paths are relative to, or absolute inside, `/workspace`; parent directories are created, files are owned by `agent`; `..` segments or paths outside the workspace → 400
+- `POST /api/containers/:id/exec` — run a bash command as the `agent` user (agent CLIs on PATH): body `{ command, cwd?, timeoutSeconds? }` (default cwd `/workspace`, timeout 60 s, max 600 s) → `{ exitCode, stdout, stderr, truncated, timedOut, durationMs }`; stdout/stderr capped at 1 MiB each. 400 on invalid body, 404 unknown worker, 403 other user's worker, 409 when not running
+- `GET /api/containers/:id/desktop/screenshot` — PNG (`image/png`, 1920x1080) of the worker's virtual display (maim). 409 when not running
+- `POST /api/containers/:id/desktop/input` — one mouse / keyboard action on the virtual display (xdotool): `{ action, x?, y?, toX?, toY?, text?, keys?, direction?, amount? }` with actions `click` / `double_click` / `right_click` / `middle_click` (at x,y or the current pointer), `move`, `drag` (x,y → toX,toY), `scroll` (direction up/down/left/right, amount 1–50, default 3), `type` (text), `key` (xdotool key names, e.g. `ctrl+l Return`). Field validation → 400
 - `GET /api/containers/:id/metrics` — single worker's live resource metrics (zeroed snapshot when not running / not yet sampled). Ownership-checked (`requireContainerAccess`): 401 unauth, 403 cross-user, 404 unknown id.
 - `GET /api/containers/:id/export` — stream a worker export bundle (`.tar`). `?includeRootfs=` (default `true`) toggles the `docker export` filesystem snapshot. 401/403/404 as above; the worker must be running or stopped. See §28.
 - `POST /api/containers/import` — restore a worker from an export bundle (raw `.tar` request body, `Content-Type: application/x-tar`). `?displayName=` overrides the restored label. Returns 201 + the new `ContainerInfo` (fresh UUID id). 400 on an invalid bundle, 401 unauth. See §28.
@@ -780,6 +784,8 @@ Every pane type supports **multiple simultaneous instances**. Clicking the Termi
 - `POST /api/containers/:id/panes` — create window (optional name, auto-generated "shell-xxxx")
 - `PUT /api/containers/:id/panes/:windowIndex` — rename window (name validation: alphanumeric/underscore/hyphen)
 - `DELETE /api/containers/:id/panes/:windowIndex` — kill window (window 0 protected: 403)
+- `POST /api/containers/:id/panes/:windowIndex/keys` — type into a window like a user at the keyboard: `{ keys?: string[], text?: string, enter?: boolean }` applied in order keys (tmux key names, e.g. `C-c`, `Up`) → literal text → Enter (short pause before Enter so TUIs don't treat it as part of a paste). Unknown window → 404; invalid body → 400
+- `GET /api/containers/:id/panes/:windowIndex/capture?history=N` — the window's visible screen as plain text (`{ content }`), plus N lines of scrollback (0–10000). Unknown window → 404
 
 ### 24.4 Apps
 - `GET /api/containers/:id/apps` — list all app instances. Each entry carries `{ id, appType, port, status }` plus optional `externalPort` (ssh) / `machineName` (vscode) / `authUrl` (vscode) / `authCode` (vscode). `status` is `'running' | 'stopped' | 'auth_required'`.
@@ -874,6 +880,8 @@ Every pane type supports **multiple simultaneous instances**. Clicking the Termi
 - `GET /api/package-manager-domains` — PM domain list
 
 ### 24.15a Per-user Account env vars and credentials
+- `GET /api/account/me` — the current user `{ id, name, email, role, emailVerified, banned, createdAt, updatedAt }`
+- `PATCH /api/account/profile` — update the current user's `name` and/or `email` (validated; taken email → 409; `role` is ignored)
 - `GET /api/account/env-vars` — returns the current user's `UserEnvVars` `{ userId, createdAt, updatedAt, envVars: [{ key, value }] }` — a single uniform list keyed by the env var NAME, no hardcoded fields. Owner-only — admins do NOT see other users' values via this endpoint.
 - `PUT /api/account/env-vars` — REPLACES the current user's `envVars` list with the supplied `{ envVars: [...] }`. There is no per-field/partial-update semantics anymore — the whole list is the unit of update. Every key must match `[A-Z_][A-Z0-9_]*`, must not collide with reserved names (`ENVIRONMENT`, `WORKER`, `ORCHESTRATOR_URL`, etc.), and must be unique. Validation failures return 400.
 - `GET /api/account/ssh-key` — returns the current user's SSH public key `{ sshPublicKey }`, read from `<DATA_DIR>/users/<userId>/ssh/authorized_keys`. Owner-only. The SSH key is NOT stored in env-vars.json.
@@ -928,6 +936,14 @@ The port-mapping / domain-mapping / usage routes additionally **enforce the call
 | `POST` | `/api/worker-self/usage/refresh` | Force-refresh for the same userId |
 
 The session-authenticated `/api/port-mappings`, `/api/domain-mappings`, and `/api/usage` routes still exist for the dashboard UI but are unreachable from inside a worker (no session cookie). All worker-side built-in capabilities reference the `/api/worker-self/*` form exclusively.
+
+### 24.19 Users (admin)
+- `GET /api/users` — list users (`User` shape as in §24.15a)
+- `POST /api/users` — create `{ name, email, password?, role? }` (email lowercased and validated, password ≥ 8 chars, role `admin` | `user`, default `user`); duplicate email → 409
+- `PATCH /api/users/:id` — update `name`, `email` (409 when taken), `role`; an admin cannot remove their own admin role (400)
+- `PUT /api/users/:id/password` — set another user's password `{ newPassword }` (≥ 8 chars) without the current one; your own → 400 (use the Account modal, which requires the current password)
+- `DELETE /api/users/:id` — delete the user and their sessions, then sweep all their Agentor data immediately; deleting yourself → 400
+- Every route: 401 unauthenticated, 403 for non-admins, 404 unknown user. Implemented on better-auth's server API / internal adapter (the admin plugin's own endpoints only accept browser sessions)
 
 ---
 

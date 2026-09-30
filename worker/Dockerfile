@@ -155,6 +155,11 @@ RUN userdel -r ubuntu 2>/dev/null || true && \
 RUN printf 'Xft.dpi: 96\nXft.antialias: true\nXft.hinting: true\nXft.hintstyle: hintslight\nXft.rgba: rgb\nXft.lcdfilter: lcddefault\n' > /home/agent/.Xresources && \
     chown agent:agent /home/agent/.Xresources
 
+# Desktop automation behind the orchestrator's desktop screenshot / input API:
+# maim captures the Xvfb display as PNG, xdotool drives mouse and keyboard.
+RUN apt-get update && apt-get install -y --no-install-recommends maim xdotool && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 COPY --chmod=755 entrypoint.sh /home/agent/entrypoint.sh
 COPY --chmod=755 loading-screen.sh /home/agent/loading-screen.sh
 COPY --chmod=755 memfd-exec.py /home/agent/memfd-exec.py

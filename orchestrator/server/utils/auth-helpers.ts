@@ -95,6 +95,21 @@ export function requireContainerAccess(
 }
 
 /**
+ * `requireContainerAccess` for routes that talk to the live container: also
+ * throws 409 when the worker is not running.
+ */
+export function requireRunningContainerAccess(
+  event: H3Event,
+  container: { userId: string; status: string } | undefined | null
+): AuthContext {
+  const ctx = requireContainerAccess(event, container);
+  if (container!.status !== 'running') {
+    throw createError({ statusCode: 409, statusMessage: 'Worker container is not running' });
+  }
+  return ctx;
+}
+
+/**
  * Normalises a better-auth `getSession` result into our AuthContext shape.
  * Returns null if the session is missing or incomplete.
  */

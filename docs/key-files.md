@@ -22,9 +22,15 @@
 - `orchestrator/server/utils/config.ts` - Environment variable parsing (includes `betterAuthSecret`)
 - `orchestrator/server/utils/auth.ts` - better-auth singleton + admin plugin + @better-auth/passkey plugin; exports `useAuth()`, `migrateAuth()`, `hasAnyUsers()`, `setUserRoleDirect()`, `getCredentialSummary()`, `removeUserPassword()`. Implements `resolveUser()` for passkey-first registration via the setup-token store.
 - `orchestrator/server/utils/setup-token-store.ts` - In-memory 5-minute one-shot tokens used as opaque `context` for passkey-first registration when no session exists. Consumed by `/api/setup/create-admin-passkey-token` and the `resolveUser` callback.
-- `orchestrator/server/utils/auth-helpers.ts` - `requireAuth`, `requireAdmin`, `requireContainerAccess`, `canAccessResource`, `authenticateWsPeer`
+- `orchestrator/server/utils/auth-helpers.ts` - `requireAuth`, `requireAdmin`, `requireContainerAccess`, `requireRunningContainerAccess`, `canAccessResource`, `authenticateWsPeer`
 - `orchestrator/server/middleware/auth.ts` - Global Nitro middleware enforcing auth on `/api/*` (skips auth/setup/health/docs/worker-self)
 - `orchestrator/server/utils/worker-auth.ts` - `requireWorkerSelf(event)` — identifies the calling worker by source IP on the agentor-net Docker network (no session needed). Used by every `/api/worker-self/*` route.
+- `orchestrator/server/utils/user-admin.ts` - User management on better-auth's server API / internal adapter (`/api/users`, `/api/account/me|profile`)
+- `orchestrator/server/api/users/*.ts` - Admin user management (`index.get`, `index.post`, `[id].patch`, `[id].delete`, `[id]/password.put`)
+- `orchestrator/server/api/account/me.get.ts` + `profile.patch.ts` - Current user; self-service name/email update
+- `orchestrator/server/api/containers/[id]/exec.post.ts` - Run a command in a worker (bash as `agent`, timeout, capped stdout/stderr)
+- `orchestrator/server/api/containers/[id]/panes/[windowIndex]/keys.post.ts` + `capture.get.ts` - tmux send-keys / capture-pane
+- `orchestrator/server/api/containers/[id]/desktop/screenshot.get.ts` + `input.post.ts` - Virtual desktop PNG screenshot (maim) and mouse / keyboard input (xdotool)
 - `orchestrator/server/api/worker-self/info.get.ts` - Worker identity diagnostic endpoint
 - `orchestrator/server/api/worker-self/port-mappings/*.ts` - Worker-self port mapping CRUD (`index.get`, `index.post`, `[port].delete`)
 - `orchestrator/server/api/worker-self/port-mapper/status.get.ts` - Worker-self port mapper status
@@ -109,7 +115,7 @@
 - `orchestrator/app/composables/useAuth.ts` - better-auth Vue client wrapper (session, user, isAdmin, signIn, signOut, admin plugin)
 - `orchestrator/app/plugins/xterm.client.ts` - Provides `$Terminal` and `$FitAddon` globally (avoids SSR import issues)
 - `orchestrator/app/components/AppSidebar.vue` - Left sidebar (container list, archived workers, port mappings, domain mappings, usage panel, update notification, **signed-in user card + sign out + Users modal trigger for admins**)
-- `orchestrator/app/components/UsersModal.vue` - Admin-only user management (list, create, change role, reset password, delete)
+- `orchestrator/app/components/UsersModal.vue` - Admin-only user management (list, create, change role, reset password, delete) via `/api/users`
 - `orchestrator/app/components/AccountModal.vue` - Self-service account modal: profile (name + email), password (change/set/remove with two-step confirm), passkeys (list/add/remove with two-step confirm). Backed by `client.passkey.*`, `client.changePassword`, `client.changeEmail`, `client.updateUser` and Agentor's custom `/api/account/*` endpoints.
 - `orchestrator/app/components/AppInstanceRow.vue` - Single app row in AppsPane
 - `orchestrator/app/components/AppsPane.vue` - App instances for a container
@@ -175,7 +181,7 @@
 - `orchestrator/app/types/index.ts` - Client-side TypeScript types: re-exports shared types (including AgentAuthType, UsageWindow, AgentUsageInfo, AgentUsageStatus, ExposeApis, CapabilityInfo, InstructionInfo, InitScriptInfo, CredentialInfo, LogLevel, LogSource, LogEntry) + defines GitProviderInfo, GitHubRepoInfo, GitHubBranchInfo, AppTypeInfo, PortMapping, DomainMapping, DomainMapperStatus, EnvironmentInfo, WorkerSystemEnvVar, ArchivedWorker, TabType, Tab, SplitDirection, PaneLeafNode, PaneContainerNode, PaneNode, DragPayload, DropZone, ChallengeType, BaseDomainConfig
 
 ## Worker
-- `worker/Dockerfile` - Unified worker image (Node.js 22, all agent CLIs, code-server, display stack, Chromium, Playwright, Firefox, microsocks, utility packages, agent user, entrypoint)
+- `worker/Dockerfile` - Unified worker image (Node.js 22, all agent CLIs, code-server, display stack, Chromium, Playwright, Firefox, microsocks, maim + xdotool for the desktop screenshot / input API, utility packages, agent user, entrypoint)
 - `worker/entrypoint.sh` - Entrypoint (tmux, env var export, agent setups, docker daemon, display stack, code-server, git auth, repo clone, firewall, setup script, launch)
 - `worker/loading-screen.sh` - Animated startup display (braille spinner, progress bar, per-step timing)
 - `worker/memfd-exec.py` - Script executor via memfd_create (no temp files on disk, supports any shebang)
@@ -197,7 +203,7 @@
 - `tests/helpers/ui-helpers.ts` - Page navigation and interaction helpers
 - `tests/helpers/test-users.ts` - Create/sign-in/delete test users via the admin API (used by passkey + authorization tests)
 - `tests/helpers/webauthn.ts` - Install/dispose Chrome DevTools virtual WebAuthn authenticator for end-to-end passkey tests (`installVirtualAuthenticator(page)`)
-- `tests/api/*.spec.ts` - API integration tests (56 files; incl. worker-metrics, worker-export-import, github-repos)
+- `tests/api/*.spec.ts` - API integration tests (62 files; incl. worker-metrics, worker-export-import, github-repos, worker-exec, tmux-io, desktop-control, users)
 - `tests/ui/*.spec.ts` - UI integration tests (43 files; incl. worker-card-actions, import-worker-modal, github-autocomplete-refresh)
 - `tests/FEATURES.md` - Feature inventory driving test coverage
 - `tests/TESTS.md` - Test suite documentation with counts per file

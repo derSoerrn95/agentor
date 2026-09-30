@@ -104,11 +104,11 @@ test.describe('Users modal (admin)', () => {
         (window as any).prompt = () => pw;
       }, newPassword);
 
-      // Wait for the admin set-user-password request to finish before
-      // we try to sign in with the new password.
+      // Wait for the set-password request (`PUT /api/users/:id/password`) to
+      // finish before we try to sign in with the new password.
       const [setPasswordResponse] = await Promise.all([
         page.waitForResponse(
-          (res) => res.url().includes('/api/auth/admin/set-user-password') && res.request().method() === 'POST',
+          (res) => res.url().includes(`/api/users/${user.id}/password`) && res.request().method() === 'PUT',
           { timeout: 10_000 },
         ),
         row.getByRole('button', { name: 'Reset password' }).click(),

@@ -6,7 +6,7 @@ Agentor uses [better-auth](https://www.better-auth.com/) with its admin plugin f
 
 On a fresh install, the SQLite auth database is empty. Navigating to any page redirects to `/setup`, where the first user is created and automatically promoted to `admin`. This is the only way to create the initial admin — the `create-admin` endpoint is disabled once any user exists (returns 409).
 
-After the initial admin, additional users (with `user` or `admin` role) can be created by an existing admin via the Users modal in the sidebar, which uses better-auth's admin plugin endpoints under `/api/auth/admin/*`.
+After the initial admin, additional users (with `user` or `admin` role) can be created by an existing admin via the Users modal in the sidebar, backed by the `/api/users` REST API.
 
 ## Roles
 
@@ -55,7 +55,8 @@ Application data remains in JSON files (via `JsonStore`) — we only use SQLite 
 | Auth instance | `orchestrator/server/utils/auth.ts` | `betterAuth()` configuration with admin plugin, session config, and migration runner |
 | Auth handler | `orchestrator/server/api/auth/[...all].ts` | Catch-all that forwards `/api/auth/*` to `auth.handler()` |
 | Middleware | `orchestrator/server/middleware/auth.ts` | Global Nitro middleware that extracts the session on every `/api/*` request and populates `event.context.auth`. Skips `/api/auth/**`, `/api/health`, `/api/setup/**`, `/api/docs`, and `/api/worker-self/**`. |
-| Helpers | `orchestrator/server/utils/auth-helpers.ts` | `requireAuth(event)`, `requireAdmin(event)`, `requireContainerAccess(event, container)`, `canAccessResource(...)`, `authenticateWsPeer(peer)` |
+| Helpers | `orchestrator/server/utils/auth-helpers.ts` | `requireAuth(event)`, `requireAdmin(event)`, `requireContainerAccess(event, container)`, `requireRunningContainerAccess(...)`, `canAccessResource(...)`, `authenticateWsPeer(peer)` |
+| User admin | `orchestrator/server/utils/user-admin.ts` | `/api/users` + `/api/account` logic on better-auth's server API / internal adapter (list, create, update name/email/role, set password, delete + immediate orphan sweep) |
 | Worker auth | `orchestrator/server/utils/worker-auth.ts` | `requireWorkerSelf(event)` — identifies the calling worker by source IP on the `agentor-net` Docker bridge network. Used by every `/api/worker-self/*` route in place of session auth. |
 | Setup endpoints | `orchestrator/server/api/setup/status.get.ts` + `create-admin.post.ts` | First-run detection and initial admin creation |
 
@@ -82,7 +83,7 @@ Applied to:
 | Route guard | `orchestrator/app/middleware/auth.global.ts` | Global Nuxt route middleware — redirects to `/setup` on first run, `/login` when no session |
 | Login page | `orchestrator/app/pages/login.vue` | Email/password form; calls `client.signIn.email()` and redirects to `/` |
 | Setup page | `orchestrator/app/pages/setup.vue` | Initial admin creation form; calls `POST /api/setup/create-admin` then signs in |
-| Users modal | `orchestrator/app/components/UsersModal.vue` | Admin-only user management — list, create, change role, delete |
+| Users modal | `orchestrator/app/components/UsersModal.vue` | Admin-only user management — list, create, change role, reset password, delete — via the `/api/users` REST API |
 | Sidebar footer | `orchestrator/app/components/AppSidebar.vue` | Account info + sign out button pinned to the bottom of the sidebar (always visible, outside the tab content) |
 
 ## Admin-only Endpoints
@@ -90,7 +91,8 @@ Applied to:
 - `GET /api/settings` — system configuration
 - `GET/DELETE /api/logs` — log query + clear
 - `POST /api/updates/apply`, `/check`, `/prune` — image updates
-- `POST /api/auth/admin/*` — user management (create, list, setRole, remove, ban/unban)
+- `/api/users/**` — user management (list, create, update name/email/role, set password, delete). An admin cannot demote or delete themselves.
+- `POST /api/auth/admin/*` — better-auth's own admin plugin endpoints (session-only; the dashboard uses `/api/users`)
 - `WS /ws/logs` — live log stream
 
 All other authenticated endpoints are accessible to both admins and regular users (subject to resource ownership).

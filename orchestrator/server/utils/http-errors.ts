@@ -19,3 +19,12 @@ export function rethrowAsHttpError(err: unknown, fallbackMessage = 'Operation fa
   const message = err instanceof Error ? err.message : fallbackMessage;
   throw createError({ statusCode: 500, statusMessage: message });
 }
+
+/** `rethrowAsHttpError` for tmux commands: tmux's "can't find window/pane"
+ * becomes a 404 instead of a 500. */
+export function rethrowTmuxError(err: unknown): never {
+  if (err instanceof Error && /can't find (window|pane|session)/i.test(err.message)) {
+    throw createError({ statusCode: 404, statusMessage: 'tmux window not found' });
+  }
+  rethrowAsHttpError(err);
+}

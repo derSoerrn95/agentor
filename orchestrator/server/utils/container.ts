@@ -21,6 +21,7 @@ import { getAllGitCloneDomains } from './git-providers';
 import { getAllAgentApiDomains } from './agent-config';
 import { getPackageManagerDomains, DEFAULT_ENVIRONMENT_ID } from './environments';
 import { getUserById } from './auth';
+import { WORKSPACE_ROOT } from './validation';
 import type { EnvironmentStore, Environment } from './environments';
 import type { WorkerStore, WorkerRecord } from './worker-store';
 import type { UserCredentialManager } from './user-credentials';
@@ -28,7 +29,7 @@ import type { UserEnvVarStore } from './user-env-store';
 import type { CapabilityStore } from './capability-store';
 import type { InstructionStore } from './instruction-store';
 import type { StorageManager } from './storage';
-import type { ExposeApis, ServiceStatus, ContainerInfo, ContainerStatus, CreateContainerRequest, UpdateContainerSettingsRequest, RepoConfig, MountConfig, UserEnvVars } from '../../shared/types';
+import type { ExposeApis, ServiceStatus, ContainerInfo, ContainerStatus, CreateContainerRequest, UpdateContainerSettingsRequest, RepoConfig, MountConfig, UserEnvVars, WorkerExecResult, TmuxKeysInput, DesktopInputAction } from '../../shared/types';
 
 
 interface ResolvedEnvConfig {
@@ -46,6 +47,41 @@ interface ResolvedEnvConfig {
 const WORKER_ID_LABEL = 'agentor.id';
 /** Repo prefix for per-worker images created by `docker import` on restore. */
 const IMPORT_IMAGE_PREFIX = 'agentor-import-';
+
+export const EXEC_DEFAULT_TIMEOUT_SECONDS = 60;
+export const EXEC_MAX_TIMEOUT_SECONDS = 600;
+/** Per-stream (stdout / stderr) output cap for `execCommand`. */
+const EXEC_MAX_OUTPUT_BYTES = 1024 * 1024;
+const TMUX_ENTER_DELAY_MS = 150;
+/** The Xvfb display every worker runs (see worker/entrypoint.sh). */
+const WORKER_DISPLAY = ':99';
+
+const XDOTOOL_BUTTONS = { click: '1', middle_click: '2', right_click: '3', double_click: '1' } as const;
+const XDOTOOL_SCROLL_BUTTONS = { up: '4', down: '5', left: '6', right: '7' } as const;
+
+/** Translate a desktop input action into xdotool arguments. Validation of the
+ * action's fields happens in the route; this only maps shapes. */
+function xdotoolArgs(input: DesktopInputAction): string[] {
+  const at = (x?: number, y?: number) => (x !== undefined && y !== undefined ? ['mousemove', '--sync', String(x), String(y)] : []);
+  switch (input.action) {
+    case 'click':
+    case 'middle_click':
+    case 'right_click':
+      return [...at(input.x, input.y), 'click', XDOTOOL_BUTTONS[input.action]];
+    case 'double_click':
+      return [...at(input.x, input.y), 'click', '--repeat', '2', '--delay', '80', XDOTOOL_BUTTONS.double_click];
+    case 'move':
+      return at(input.x, input.y);
+    case 'drag':
+      return [...at(input.x, input.y), 'mousedown', '1', 'mousemove', '--sync', String(input.toX), String(input.toY), 'mouseup', '1'];
+    case 'scroll':
+      return [...at(input.x, input.y), 'click', '--repeat', String(input.amount ?? 3), XDOTOOL_SCROLL_BUTTONS[input.direction ?? 'down']];
+    case 'type':
+      return ['type', '--delay', '12', '--', input.text ?? ''];
+    case 'key':
+      return ['key', '--', ...(input.keys ?? '').split(/\s+/).filter(Boolean)];
+  }
+}
 
 export class ContainerManager {
   /** Keyed by the worker's UUID `id` (stable across rebuild/unarchive). */
@@ -464,9 +500,11 @@ export class ContainerManager {
     await this.dockerService.putWorkspaceArchive(info.containerId, tarBuffer);
   }
 
-  async downloadWorkspace(id: string): Promise<NodeJS.ReadableStream> {
+  /** Tar of `/workspace`, or of `workspacePath` (an absolute path inside the
+   * workspace, see `resolveWorkspacePath`) — entries are prefixed with its basename. */
+  async downloadWorkspace(id: string, workspacePath = WORKSPACE_ROOT): Promise<NodeJS.ReadableStream> {
     const info = this.assertRunning(id);
-    return this.dockerService.getWorkspaceArchive(info.containerId);
+    return this.dockerService.getArchive(info.containerId, workspacePath);
   }
 
   async stop(id: string): Promise<void> {
@@ -1298,6 +1336,99 @@ export class ContainerManager {
       throw new Error('Cannot kill the main tmux window');
     }
     await this.dockerService.execTmux(this.dockerIdFor(id), ['kill-window', '-t', `main:${windowIndex}`]);
+  }
+
+  // --- Programmatic access (exec, tmux I/O, desktop) ---
+  // The same interactions a human has through the terminal and desktop panes,
+  // as request/response calls (used by the REST API).
+
+  /** Run a bash command in the worker as the `agent` user. Not a login shell:
+   * `~/.bash_logout` would print terminal escapes into stdout on `exit`, and the
+   * image's PATH already includes the agent CLIs. The command is bounded by
+   * coreutils `timeout` inside the container. */
+  async execCommand(id: string, command: string, opts: { cwd?: string; timeoutSeconds?: number } = {}): Promise<WorkerExecResult> {
+    const timeoutSeconds = opts.timeoutSeconds ?? EXEC_DEFAULT_TIMEOUT_SECONDS;
+    const started = Date.now();
+    const res = await this.dockerService.execCapture(
+      this.assertRunning(id).containerId,
+      ['timeout', '--kill-after=5', String(timeoutSeconds), 'bash', '-c', command],
+      {
+        user: 'agent',
+        workingDir: opts.cwd || '/workspace',
+        maxOutputBytes: EXEC_MAX_OUTPUT_BYTES,
+        timeoutMs: (timeoutSeconds + 15) * 1000,
+      },
+    );
+    const durationMs = Date.now() - started;
+    // 124 / 137 are coreutils `timeout`'s terminate / kill codes — but a
+    // command can exit 124 itself or be OOM-killed (137), so only count them
+    // once the time limit has actually elapsed.
+    const killedByTimeout = (res.exitCode === 124 || res.exitCode === 137) && durationMs >= timeoutSeconds * 1000;
+    return {
+      exitCode: res.exitCode,
+      stdout: res.stdout.toString('utf8'),
+      stderr: res.stderr.toString('utf8'),
+      truncated: res.truncated,
+      timedOut: res.timedOut || killedByTimeout,
+      durationMs,
+    };
+  }
+
+  /** Run a tmux command, failing (unlike `execTmux`) when tmux reports an
+   * error such as an unknown window. */
+  private async tmuxStrict(id: string, args: string[]): Promise<string> {
+    const res = await this.dockerService.execCapture(this.assertRunning(id).containerId, ['tmux', ...args], { timeoutMs: 15_000 });
+    if (res.exitCode !== 0) {
+      throw new Error(res.stderr.toString('utf8').trim() || `tmux ${args[0]} failed`);
+    }
+    return res.stdout.toString('utf8');
+  }
+
+  /** Type into a tmux window as if at the keyboard — see `TmuxKeysInput`. */
+  async sendTmuxKeys(id: string, windowIndex: number, input: TmuxKeysInput): Promise<void> {
+    const target = `main:${windowIndex}`;
+    // `--` ends tmux's options, so text such as `- item` or `--help` is typed, not parsed.
+    if (input.keys?.length) await this.tmuxStrict(id, ['send-keys', '-t', target, '--', ...input.keys]);
+    if (input.text) await this.tmuxStrict(id, ['send-keys', '-t', target, '-l', '--', input.text]);
+    if (input.enter) {
+      // TUIs (agent CLIs) treat an Enter that arrives in the same read as the
+      // text as part of a paste; a short pause makes it a real key press.
+      if (input.text) await new Promise((resolve) => setTimeout(resolve, TMUX_ENTER_DELAY_MS));
+      await this.tmuxStrict(id, ['send-keys', '-t', target, 'Enter']);
+    }
+  }
+
+  /** The visible screen of a tmux window plus `historyLines` of scrollback, as
+   * plain text (wrapped lines joined, trailing blank lines removed). */
+  async captureTmuxWindow(id: string, windowIndex: number, historyLines = 0): Promise<string> {
+    const output = await this.tmuxStrict(id, [
+      'capture-pane', '-p', '-J', '-t', `main:${windowIndex}`, '-S', historyLines > 0 ? `-${historyLines}` : '0',
+    ]);
+    return output.replace(/\s+$/, '');
+  }
+
+  /** PNG screenshot of the worker's virtual display (Xvfb `:99`). */
+  async captureDesktopScreenshot(id: string): Promise<Buffer> {
+    const res = await this.dockerService.execCapture(this.assertRunning(id).containerId, ['maim', '--hidecursor'], {
+      env: [`DISPLAY=${WORKER_DISPLAY}`],
+      maxOutputBytes: 64 * 1024 * 1024,
+      timeoutMs: 20_000,
+    });
+    if (res.exitCode !== 0 || res.stdout.length === 0) {
+      throw new Error(`screenshot failed: ${res.stderr.toString('utf8').trim() || `exit ${res.exitCode}`}`);
+    }
+    return res.stdout;
+  }
+
+  /** Perform one mouse / keyboard action on the worker's virtual display. */
+  async sendDesktopInput(id: string, input: DesktopInputAction): Promise<void> {
+    const res = await this.dockerService.execCapture(this.assertRunning(id).containerId, ['xdotool', ...xdotoolArgs(input)], {
+      env: [`DISPLAY=${WORKER_DISPLAY}`],
+      timeoutMs: 60_000,
+    });
+    if (res.exitCode !== 0) {
+      throw new Error(`desktop input failed: ${res.stderr.toString('utf8').trim() || `exit ${res.exitCode}`}`);
+    }
   }
 
   getServiceStatus(id: string): ServiceStatus {

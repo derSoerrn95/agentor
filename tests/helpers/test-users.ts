@@ -74,6 +74,14 @@ export async function signInBrowserAsUser(
   }
 }
 
+/** A request context signed in as `email` (for acting as a non-admin user via the API). */
+export async function signedInContext(email: string, password: string): Promise<APIRequestContext> {
+  const ctx = await playwrightRequest.newContext(CONTEXT_OPTS);
+  const res = await ctx.post('/api/auth/sign-in/email', { data: { email, password } });
+  if (!res.ok()) throw new Error(`sign-in as ${email} failed: ${res.status()} ${await res.text()}`);
+  return ctx;
+}
+
 /**
  * Delete a test user (cleanup helper). Idempotent — ignores errors.
  */

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const open = defineModel<boolean>('open', { default: false });
 
-const { client, user: currentUser } = useAuth();
+const { user: currentUser } = useAuth();
 
 interface UserRow {
   id: string;
@@ -19,28 +19,27 @@ const error = ref('');
 const creating = ref(false);
 const newUser = reactive({ name: '', email: '', password: '', role: 'user' as 'user' | 'admin' });
 
-async function refresh() {
-  loading.value = true;
+/** Runs a `/api/users` call, surfacing its error in the modal. Returns false on failure. */
+async function run(action: () => Promise<unknown>, fallback: string): Promise<boolean> {
   error.value = '';
   try {
-    // Sort newest-first so a freshly-created user is never pushed off the
-    // first page when the installation accumulates many users over time.
-    const result = await client.admin.listUsers({
-      query: { limit: 500, sortBy: 'createdAt', sortDirection: 'desc' },
-    });
-    if ((result as any)?.error) {
-      error.value = (result as any).error.message || 'Failed to load users';
-      users.value = [];
-      return;
-    }
-    const data = (result as any)?.data;
-    users.value = (data?.users ?? data ?? []) as UserRow[];
+    await action();
+    return true;
   } catch (e: any) {
-    error.value = e?.message || 'Failed to load users';
-    users.value = [];
-  } finally {
-    loading.value = false;
+    error.value = e?.data?.statusMessage || e?.statusMessage || e?.message || fallback;
+    return false;
   }
+}
+
+async function refresh() {
+  loading.value = true;
+  const ok = await run(async () => {
+    // Newest first, so a freshly created user is always at the top.
+    const list = await $fetch<UserRow[]>('/api/users');
+    users.value = [...list].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  }, 'Failed to load users');
+  if (!ok) users.value = [];
+  loading.value = false;
 }
 
 watch(open, (v) => {
@@ -61,54 +60,24 @@ function cancelCreate() {
 
 async function handleCreate() {
   if (!newUser.name || !newUser.email || !newUser.password) return;
-  error.value = '';
   loading.value = true;
-  try {
-    const result = await client.admin.createUser({
-      name: newUser.name,
-      email: newUser.email,
-      password: newUser.password,
-      role: newUser.role,
-    });
-    if ((result as any)?.error) {
-      error.value = (result as any).error.message || 'Failed to create user';
-      return;
-    }
-    creating.value = false;
-    await refresh();
-  } catch (e: any) {
-    error.value = e?.message || 'Failed to create user';
-  } finally {
-    loading.value = false;
-  }
+  const ok = await run(() => $fetch('/api/users', { method: 'POST', body: { ...newUser } }), 'Failed to create user');
+  loading.value = false;
+  if (!ok) return;
+  creating.value = false;
+  await refresh();
 }
 
 async function handleSetRole(u: UserRow, role: 'admin' | 'user') {
-  error.value = '';
-  try {
-    const result = await client.admin.setRole({ userId: u.id, role });
-    if ((result as any)?.error) {
-      error.value = (result as any).error.message || 'Failed to update role';
-      return;
-    }
+  if (await run(() => $fetch(`/api/users/${u.id}`, { method: 'PATCH', body: { role } }), 'Failed to update role')) {
     await refresh();
-  } catch (e: any) {
-    error.value = e?.message || 'Failed to update role';
   }
 }
 
 async function handleDelete(u: UserRow) {
   if (!confirm(`Delete user ${u.email}? This cannot be undone.`)) return;
-  error.value = '';
-  try {
-    const result = await client.admin.removeUser({ userId: u.id });
-    if ((result as any)?.error) {
-      error.value = (result as any).error.message || 'Failed to delete user';
-      return;
-    }
+  if (await run(() => $fetch(`/api/users/${u.id}`, { method: 'DELETE' }), 'Failed to delete user')) {
     await refresh();
-  } catch (e: any) {
-    error.value = e?.message || 'Failed to delete user';
   }
 }
 
@@ -119,20 +88,8 @@ async function handleResetPassword(u: UserRow) {
     error.value = 'Password must be at least 8 characters';
     return;
   }
-  error.value = '';
-  try {
-    const result = await client.admin.setUserPassword({
-      userId: u.id,
-      newPassword,
-    });
-    if ((result as any)?.error) {
-      error.value = (result as any).error.message || 'Failed to reset password';
-      return;
-    }
-    // No refresh needed — list doesn't show passwords
-  } catch (e: any) {
-    error.value = e?.message || 'Failed to reset password';
-  }
+  // No refresh needed — the list doesn't show passwords.
+  await run(() => $fetch(`/api/users/${u.id}/password`, { method: 'PUT', body: { newPassword } }), 'Failed to reset password');
 }
 </script>
 
@@ -208,6 +165,7 @@ async function handleResetPassword(u: UserRow) {
                 Demote
               </UButton>
               <UButton
+                v-if="u.id !== (currentUser as any)?.id"
                 size="xs"
                 variant="ghost"
                 title="Set a new password for this user"

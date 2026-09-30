@@ -4,7 +4,7 @@ Comprehensive end-to-end test suite for the Agentor platform using Playwright an
 
 ## Overview
 
-- **~1372 tests** across 101 test files (~830 API + ~542 UI)
+- **~1418 tests** across 106 test files (~875 API + ~543 UI)
 - **API tests**: headless, no browser needed, fast execution
 - **UI tests**: Desktop Chrome (1920x1080), real browser interactions
 - **Terminal tests**: WebSocket-based command execution and agent CLI prompting
@@ -98,13 +98,13 @@ tests/
     worker-lifecycle.ts    # Container create/cleanup utilities
     ui-helpers.ts          # Page navigation and interaction helpers
     terminal-ws.ts         # WebSocket terminal client + ANSI stripping + credential checks
-  api/                     # API endpoint tests (~778 tests across 56 files)
-  ui/                      # UI interaction tests (~541 tests across 44 files)
+  api/                     # API endpoint tests (~875 tests across 62 files)
+  ui/                      # UI interaction tests (~543 tests across 44 files)
 ```
 
 ## Test Categories
 
-### API Tests (~782 tests, 57 files)
+### API Tests (~875 tests, 62 files)
 
 | File | Tests | Coverage |
 |------|-------|----------|
@@ -133,7 +133,7 @@ tests/
 | `domain-mappings-batch.spec.ts` | 23 | Batch domain mapping creation, batch path support (create with path, TCP path rejection, default empty path) |
 | `traefik-integration.spec.ts` | 34 | HTTPS routing (traffic via subdomain, TLS certificate), HTTP routing, BasicAuth (401 without credentials, 200 with credentials), Traefik lifecycle (container existence, mapping count updates, list verification), multi-domain support (baseDomains list, same subdomain on different domains), dashboard subdomain URL, wildcard routing (HTTPS + HTTP wildcard matches a child subdomain, exact host mapping beats wildcard priority, TCP wildcard terminates TLS on child SNI with wildcard cert, TCP wildcard stored mapping round-trip) |
 | `archived-workers.spec.ts` | 15 | Archive/unarchive/delete flow (`:id` path segment is the worker UUID), error handling, response fields (`id`/createdAt/archivedAt/editable `displayName`), unarchive returns the same `id` with a fresh `containerId`, unarchive preserves displayName, unarchive and verify running, double archive error, archived record omits Docker-derived fields (containerId/containerName/imageName/imageId — discovered at runtime, not persisted) while keeping id/displayName/status, port mappings survive archive and unarchive (keyed by `containerName`), port mappings removed on permanent delete of archived worker |
-| `workspace.spec.ts` | 9 | Upload (single/multi/subdirectory/empty), path traversal (basic + encoded), non-existent container, download |
+| `workspace.spec.ts` | 13 | Upload (single/multi/subdirectory/empty), path traversal (basic + encoded), non-existent container, download; JSON-body upload (UTF-8 + base64, relative or absolute-inside-`/workspace` paths, parent dirs created, files owned by `agent`), JSON traversal / outside-workspace / malformed-body 400s; sub-path download (directory + single file, `-<name>.tar.gz` filename), paths outside `/workspace` → 400, missing path → 404 |
 | `service-status.spec.ts` | 8 | Desktop/editor status, non-existent container handling, response field validation, stopped container returns not running |
 | `capabilities.spec.ts` | 24 | Capabilities CRUD, built-in capabilities (UUID id derived from slug — `tmux` is the name, fetch by UUID), validation |
 | `instructions.spec.ts` | 27 | Instruction entry CRUD, built-in entries (UUID id derived from slug — `platform-guide` is the name, fetch by UUID), validation |
@@ -165,15 +165,20 @@ tests/
 | `worker-export-import.spec.ts` | 9 | Export streams a `.tar` bundle (content-type/disposition; manifest + workspace.tar.gz + agents.tar.gz present, rootfs.tar.gz absent with `includeRootfs=false`), export 404/401; import rejects a garbage bundle (400) + 401 unauth; **round-trip**: upload a marker file → export → import (fresh UUID id, `agentor-worker-<id>` name, displayName override) → boot → download workspace and confirm the marker file restored; and port-mapping recreation for the imported worker (export with a mapping, remove source, import, assert mapping re-created on the new containerName). Round-trip uses `includeRootfs=false` for speed — the docker-export rootfs path is exercised via the default-on UI export, not in CI. |
 | `github-repos.spec.ts` | 3 | `GET /api/github/repos`: requires auth; a fresh user with no token → `tokenConfigured:false` + empty repos; a configured-but-bogus token → `tokenConfigured:true` with a surfaced `error` (regression for the old "any failure looks like no token" masking). Uses isolated test users. |
 | `ssh-auth.spec.ts` | 4 | SSH app end-to-end: starting the SSH app allocates a `22000–22999` external port mapping; a remote `whoami` over ssh with the user-supplied pubkey returns `agent`; ssh auth fails with a wrong key; a public-key update (`PUT /api/account/ssh-key`) propagates live to a running worker. (Live E2E — inherently timing-sensitive; relies on Playwright retries.) |
+| `worker-exec.spec.ts` | 11 | `POST /api/containers/:id/exec`: stdout + exit code, separate stderr, runs as `agent` in `/workspace` with the agent CLIs on PATH, `cwd`, timeout kills the command (`timedOut`), 1 MiB output cap (`truncated`), body validation (command / cwd / timeoutSeconds), 404 unknown worker, 403 other user's worker, 401 unauth, 409 stopped worker |
+| `tmux-io.spec.ts` | 7 | tmux send-keys / capture: text + Enter runs and the capture shows the computed output; `keys` sent before text (C-c interrupts a running command); text starting with `-` is typed, not parsed as tmux options; `history` includes scrollback beyond the visible screen; unknown window → 404; input validation (keys shape/names, text, enter, windowIndex, history) → 400; unknown worker → 404 |
+| `desktop-control.spec.ts` | 7 | Desktop screenshot is a 1920x1080 PNG (`image/png`); `move` / `click` variants / `drag` verified via `xdotool getmouselocation`; scroll / type / key actions succeed; action validation (unknown action, missing/negative/partial coordinates, drag target, text, unsafe key strings, direction, amount) → 400; unknown worker → 404 |
+| `users.spec.ts` | 11 | `/api/users` admin API: list (roles, shape), create (user signs in; admin role; email lowercased), create validation (400s) + duplicate email 409, update name/email/role (+ 409 / 400 cases), an admin cannot demote, delete or reset the password of themselves, set password (new works, old fails, short 400), delete (gone from list, can't sign in), unknown ids 404, regular users 403 on every route, 401 unauth |
+| `account-profile.spec.ts` | 4 | `GET /api/account/me` (admin identity + role); a user updates their own name/email via `PATCH /api/account/profile`; profile validation (empty body/name, bad email 400, taken email 409, role cannot be escalated); 401 unauth |
 
-### UI Tests (~542 tests, 44 files)
+### UI Tests (~543 tests, 44 files)
 
 | File | Tests | Coverage |
 |------|-------|----------|
 | `login.spec.ts` | 4 | Login page renders with email/password fields + passkey button, wrong credentials show error, correct credentials redirect to dashboard, unauthenticated `/` redirects to `/login` (uses fresh storageState) |
 | `passkey-management.spec.ts` | 5 | Register passkey via account modal, sign in with registered passkey, remove password after passkey, cannot remove last passkey, set new password after going passwordless. Uses CDP virtual WebAuthn authenticator (`tests/helpers/webauthn.ts`). |
 | `route-guard.spec.ts` | 6 | Unauth user on `/` → `/login`, unauth user on `/login` stays, unauth user on `/setup` (when complete) → `/login`, `/api/setup/status` public, signed-in user visiting `/login` redirected to `/`, signed-in user on `/` loads dashboard |
-| `users-modal.spec.ts` | 6 | Admin opens Users modal from System tab, create user via modal, promote + demote user, delete user, reset password, regular user does not see System tab |
+| `users-modal.spec.ts` | 6 | Admin opens Users modal from System tab, create user via modal, promote + demote user, delete user, reset password, regular user does not see System tab (the modal now uses the `/api/users` REST API) |
 | `account-modal.spec.ts` | 5 | Opens from sidebar footer, updates name (persists after reload), updates email (new email can sign in), changes password (new password can sign in), Close button dismisses modal |
 | `account-modal-env-vars.spec.ts` | 5 | Predefined (one masked input per `PREDEFINED_ENV_VAR_KEYS` entry, labeled by the env var NAME e.g. `GITHUB_TOKEN`) / Custom env vars / SSH Access / Agent OAuth credentials sections render; a predefined env var saves via **Save env vars** and persists across reload; custom env var add+save+reload round-trip; invalid custom key surfaces an inline error; SSH public key saves via the **separate** Save SSH key button (own `/api/account/ssh-key` endpoint) and persists across reload |
 | `dashboard.spec.ts` | 11 | Page load, title, buttons, sections, images, sidebar labels |

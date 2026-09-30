@@ -243,6 +243,9 @@ WebSocket terminal client with ANSI stripping for pattern matching. `TerminalWsC
 ### `ui-helpers.ts`
 Page navigation and interaction helpers for Playwright UI tests.
 
+### `test-users.ts`
+Create / sign in / delete regular (non-admin) test users via the admin API: `createTestUser()`, `signInBrowserAsUser(context, …)` for UI tests, `signedInContext(email, password)` for an API request context acting as that user, `deleteTestUser()`.
+
 ## Maintaining FEATURES.md
 
 `tests/FEATURES.md` is the canonical feature inventory — every user-facing feature must be listed there. It drives test coverage decisions.

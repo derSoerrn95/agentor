@@ -60,6 +60,48 @@ export interface ServiceStatus {
   containerId?: string;
 }
 
+/** Result of running a one-shot command in a worker (`POST /api/containers/:id/exec`). */
+export interface WorkerExecResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  /** Output beyond the per-stream cap was dropped. */
+  truncated: boolean;
+  /** The command hit its timeout and was killed. */
+  timedOut: boolean;
+  durationMs: number;
+}
+
+/** Input for a tmux window, applied in order: `keys` (tmux key names such as
+ * `C-c`, `Up`, `Escape`), then `text` (typed literally), then Enter. */
+export interface TmuxKeysInput {
+  keys?: string[];
+  text?: string;
+  enter?: boolean;
+}
+
+export type DesktopInputActionType =
+  | 'click' | 'double_click' | 'right_click' | 'middle_click'
+  | 'move' | 'drag' | 'scroll' | 'type' | 'key';
+
+/** One mouse / keyboard action on a worker's virtual desktop. Coordinates are
+ * screen pixels (the display is 1920x1080, same as the screenshot). */
+export interface DesktopInputAction {
+  action: DesktopInputActionType;
+  x?: number;
+  y?: number;
+  /** Drag end point. */
+  toX?: number;
+  toY?: number;
+  /** Text for `type`. */
+  text?: string;
+  /** xdotool key combination for `key`, e.g. `Return`, `ctrl+l`, `alt+Tab`. */
+  keys?: string;
+  direction?: 'up' | 'down' | 'left' | 'right';
+  /** Scroll steps (default 3). */
+  amount?: number;
+}
+
 export type ContainerStatus = 'creating' | 'running' | 'stopped' | 'removing' | 'error';
 
 /** A worker. `id` is the worker's stable UUID identity (immutable across

@@ -31,6 +31,43 @@ export class ApiClient {
     return { status: res.status(), body: await res.json().catch(() => ({})) };
   }
 
+  // ─── Users (admin) ────────────────────────────────────────────
+  async listUsers() {
+    const res = await this.request.get(`${BASE_URL}/api/users`);
+    return { status: res.status(), body: await res.json() };
+  }
+
+  async createUser(data: Record<string, unknown>) {
+    const res = await this.request.post(`${BASE_URL}/api/users`, { data });
+    return { status: res.status(), body: await res.json() };
+  }
+
+  async updateUser(id: string, data: Record<string, unknown>) {
+    const res = await this.request.patch(`${BASE_URL}/api/users/${id}`, { data });
+    return { status: res.status(), body: await res.json() };
+  }
+
+  async setUserPassword(id: string, newPassword: unknown) {
+    const res = await this.request.put(`${BASE_URL}/api/users/${id}/password`, { data: { newPassword } });
+    return { status: res.status(), body: await res.json() };
+  }
+
+  async deleteUser(id: string) {
+    const res = await this.request.delete(`${BASE_URL}/api/users/${id}`);
+    return { status: res.status(), body: await res.json() };
+  }
+
+  // ─── Account: current user + profile ──────────────────────────
+  async getCurrentUser() {
+    const res = await this.request.get(`${BASE_URL}/api/account/me`);
+    return { status: res.status(), body: await res.json() };
+  }
+
+  async updateAccountProfile(data: Record<string, unknown>) {
+    const res = await this.request.patch(`${BASE_URL}/api/account/profile`, { data });
+    return { status: res.status(), body: await res.json() };
+  }
+
   // ─── Setup ────────────────────────────────────────────────────
   async getSetupStatus() {
     const res = await this.request.get(`${BASE_URL}/api/setup/status`);
@@ -116,9 +153,44 @@ export class ApiClient {
     return { status: res.status(), body: await res.json() };
   }
 
-  async downloadWorkspace(id: string) {
-    const res = await this.request.get(`${BASE_URL}/api/containers/${id}/workspace`);
+  async downloadWorkspace(id: string, path?: string) {
+    const res = await this.request.get(`${BASE_URL}/api/containers/${id}/workspace`, {
+      params: path !== undefined ? { path } : undefined,
+    });
     return { status: res.status(), headers: res.headers(), body: await res.body() };
+  }
+
+  async uploadWorkspaceJson(id: string, files: { path: string; content: string; encoding?: 'utf8' | 'base64' }[]) {
+    const res = await this.request.post(`${BASE_URL}/api/containers/${id}/workspace`, { data: { files } });
+    return { status: res.status(), body: await res.json() };
+  }
+
+  // ─── Exec / terminal / desktop control ────────────────────────
+  async execCommand(id: string, data: { command?: unknown; cwd?: unknown; timeoutSeconds?: unknown }) {
+    const res = await this.request.post(`${BASE_URL}/api/containers/${id}/exec`, { data });
+    return { status: res.status(), body: await res.json() };
+  }
+
+  async sendTmuxKeys(id: string, windowIndex: number | string, data: { keys?: unknown; text?: unknown; enter?: unknown }) {
+    const res = await this.request.post(`${BASE_URL}/api/containers/${id}/panes/${windowIndex}/keys`, { data });
+    return { status: res.status(), body: await res.json() };
+  }
+
+  async captureTmuxWindow(id: string, windowIndex: number | string, history?: number | string) {
+    const res = await this.request.get(`${BASE_URL}/api/containers/${id}/panes/${windowIndex}/capture`, {
+      params: history !== undefined ? { history: String(history) } : undefined,
+    });
+    return { status: res.status(), body: await res.json() };
+  }
+
+  async getDesktopScreenshot(id: string) {
+    const res = await this.request.get(`${BASE_URL}/api/containers/${id}/desktop/screenshot`);
+    return { status: res.status(), headers: res.headers(), body: await res.body() };
+  }
+
+  async sendDesktopInput(id: string, data: Record<string, unknown>) {
+    const res = await this.request.post(`${BASE_URL}/api/containers/${id}/desktop/input`, { data });
+    return { status: res.status(), body: await res.json() };
   }
 
   async uploadToWorkspace(id: string, files: { name: string; content: Buffer; mimeType?: string }[]) {
