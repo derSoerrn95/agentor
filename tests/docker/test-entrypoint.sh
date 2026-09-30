@@ -158,7 +158,12 @@ build_with_retry() {
     local ctx=$2
     local attempt
     for attempt in 1 2 3 4; do
-        if docker build -t "$img" "$ctx"; then
+        # --network host: BuildKit replaces the runner's loopback resolver
+        # (dnsmasq) with public DNS inside RUN steps, which Docker Desktop
+        # blocks or throttles — every lookup then stalls ~5s and large
+        # downloads (Playwright browsers) time out. Host networking keeps
+        # RUN steps on dnsmasq, like the rest of the runner.
+        if docker build --network host -t "$img" "$ctx"; then
             return 0
         fi
         log "Build of $img failed (attempt $attempt/4) — retrying in 5s..."
