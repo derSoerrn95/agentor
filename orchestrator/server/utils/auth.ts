@@ -99,17 +99,30 @@ export interface PasskeyConfig {
  *
  * If the dashboard is served over Traefik (DASHBOARD_SUBDOMAIN and
  * DASHBOARD_BASE_DOMAIN are set), we use that domain as both the origin and
- * the rpID. Otherwise passkeys are disabled entirely — they can't be made to
- * work reliably when the dashboard is reached by raw IP / localhost because
- * the rpID would have to match whatever the browser happens to be on.
+ * the rpID. Otherwise, if BETTER_AUTH_URL is an `https://` URL — the dashboard
+ * sits behind a reverse proxy at a stable HTTPS origin — that URL is used.
+ * Without either, passkeys are disabled — they can't be made to work reliably
+ * when the dashboard is reached by raw IP / localhost because the rpID would
+ * have to match whatever the browser happens to be on.
  *
  * Override the auto-detected rpID via `BETTER_AUTH_RP_ID` for advanced setups.
  */
+function passkeyConfigFromAuthUrl(config: ReturnType<typeof loadConfig>): PasskeyConfig {
+  let url: URL;
+  try {
+    url = new URL(config.betterAuthUrl);
+  } catch {
+    return { enabled: false };
+  }
+  if (url.protocol !== 'https:') return { enabled: false };
+  return { enabled: true, rpID: config.betterAuthRpId || url.hostname, origin: url.origin };
+}
+
 function resolvePasskeyConfig(config: ReturnType<typeof loadConfig>): PasskeyConfig {
   const sub = config.dashboardSubdomain;
   const base = config.dashboardBaseDomain;
   if (!sub || !base) {
-    return { enabled: false };
+    return passkeyConfigFromAuthUrl(config);
   }
 
   const host = `${sub}.${base}`;
@@ -344,9 +357,14 @@ export function getMcpAuthConfig(): McpAuthConfig {
   return resolveMcpConfig(loadConfig());
 }
 
-/** Returns whether passkey authentication is enabled (dashboard is on Traefik). */
+/** Returns whether passkey authentication is enabled (dashboard on Traefik, or an https BETTER_AUTH_URL). */
 export function isPasskeyEnabled(): boolean {
   return resolvePasskeyConfig(loadConfig()).enabled;
+}
+
+/** The resolved passkey config (enabled + rpID/origin), for display in settings. */
+export function getPasskeyConfig(): PasskeyConfig {
+  return resolvePasskeyConfig(loadConfig());
 }
 
 export function useAuth(): any {

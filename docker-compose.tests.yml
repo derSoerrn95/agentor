@@ -37,6 +37,8 @@ services:
       # tuning (e.g. `TEST_WORKERS=1` to debug serially).
       - TEST_WORKERS=${TEST_WORKERS:-8}
       - CI=${CI:-}
+      # Optional stack variant (tests/docker/variants/<name>.{yml,sh}).
+      - TEST_STACK_VARIANT=${TEST_STACK_VARIANT:-}
 
 volumes:
   test-runner-docker:

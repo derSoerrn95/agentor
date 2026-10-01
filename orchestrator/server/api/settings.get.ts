@@ -18,7 +18,7 @@ import { useConfig, useInitScriptStore } from '../utils/services';
 import { listGitProviders } from '../utils/git-providers';
 import { listAppTypes } from '../utils/apps';
 import { requireAdmin } from '../utils/auth-helpers';
-import { getMcpAuthConfig } from '../utils/auth';
+import { getMcpAuthConfig, getPasskeyConfig } from '../utils/auth';
 
 interface SettingItem {
   key: string;
@@ -42,6 +42,7 @@ export default defineEventHandler(async (event) => {
   requireAdmin(event);
   const config = useConfig();
   const mcp = getMcpAuthConfig();
+  const passkey = getPasskeyConfig();
   const sections: SettingSection[] = [];
 
   // --- Docker & Infrastructure ---
@@ -91,6 +92,7 @@ export default defineEventHandler(async (event) => {
   if (config.baseDomains.length > 0) {
     const domainItems: SettingItem[] = [
       { key: 'BASE_DOMAINS', label: 'Base Domains', value: config.baseDomains, type: 'list' },
+      { key: 'TRAEFIK_MODE', label: 'Traefik Mode', value: config.traefikMode, type: 'string' },
       { key: 'TRAEFIK_IMAGE', label: 'Traefik Image', value: config.traefikImage, type: 'string' },
       { key: 'ACME_EMAIL', label: 'ACME Email', value: config.acmeEmail || 'not set', type: 'string' },
     ];
@@ -222,9 +224,9 @@ export default defineEventHandler(async (event) => {
       {
         key: 'BETTER_AUTH_RP_ID',
         label: 'Passkey Relying Party ID',
-        value: config.betterAuthRpId || (config.dashboardSubdomain && config.dashboardBaseDomain
-          ? `${config.dashboardSubdomain}.${config.dashboardBaseDomain} (auto)`
-          : 'passkeys disabled (no dashboard domain)'),
+        value: passkey.enabled
+          ? (config.betterAuthRpId ? passkey.rpID as string : `${passkey.rpID} (auto)`)
+          : 'passkeys disabled (no dashboard domain or https BETTER_AUTH_URL)',
         type: 'string',
       },
       {

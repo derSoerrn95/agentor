@@ -21,6 +21,8 @@ COPY daemon.json /etc/docker/daemon.json
 # no pre-seeded files needed. Tests requiring real agent auth skip
 # themselves when no key is present in the admin user's account env vars.
 COPY stack.yml /opt/test-stack/stack.yml
+# Optional stack variants, selected with TEST_STACK_VARIANT (see variants/README.md).
+COPY variants/ /opt/test-stack/variants/
 
 # Test runner entrypoint — boots dockerd, builds images, brings up the
 # inner stack, runs playwright with passthrough args, tears down on exit.

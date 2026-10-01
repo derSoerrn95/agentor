@@ -65,7 +65,10 @@ export class UpdateChecker {
     const images: { key: keyof Pick<UpdateStatus, 'orchestrator' | 'worker' | 'traefik'>; name: string }[] = [
       { key: 'orchestrator', name: (prefix || '') + this.config.orchestratorImage },
       { key: 'worker', name: (prefix || '') + this.config.workerImage },
-      { key: 'traefik', name: this.config.traefikImage },
+      // External mode: Traefik is not ours, so there is nothing to show or update.
+      ...(this.config.traefikMode === 'managed'
+        ? [{ key: 'traefik' as const, name: this.config.traefikImage }]
+        : []),
     ];
 
     const now = new Date().toISOString();
@@ -88,7 +91,8 @@ export class UpdateChecker {
   async check(): Promise<UpdateStatus> {
     const prefix = this.config.workerImagePrefix;
     const hasPrefix = !!prefix;
-    const hasBaseDomains = this.config.baseDomains.length > 0;
+    // Traefik is only ours to update when the orchestrator runs it (managed mode).
+    const hasBaseDomains = this.config.baseDomains.length > 0 && this.config.traefikMode === 'managed';
 
     if (!hasPrefix && !hasBaseDomains) return this.status;
 
@@ -118,7 +122,7 @@ export class UpdateChecker {
     this.status = {
       orchestrator: results[0] ?? this.status.orchestrator,
       worker: results[1] ?? this.status.worker,
-      traefik: results[2] ?? this.status.traefik,
+      traefik: this.config.traefikMode === 'managed' ? (results[2] ?? this.status.traefik) : null,
       isProductionMode: hasPrefix || hasBaseDomains,
     };
 
@@ -304,7 +308,8 @@ export class UpdateChecker {
     };
 
     const hasPrefix = !!this.config.workerImagePrefix;
-    const hasBaseDomains = this.config.baseDomains.length > 0;
+    // Traefik is only ours to update when the orchestrator runs it (managed mode).
+    const hasBaseDomains = this.config.baseDomains.length > 0 && this.config.traefikMode === 'managed';
 
     if (!hasPrefix && !hasBaseDomains) {
       result.errors.push('Not in production mode');

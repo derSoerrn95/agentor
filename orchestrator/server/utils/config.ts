@@ -31,6 +31,11 @@ export interface Config {
   dashboardSubdomain: string;
   acmeEmail: string;
   traefikImage: string;
+  /** `managed` (default): the orchestrator runs its own Traefik container.
+   * `external`: an existing reverse proxy routes traffic. The orchestrator keeps
+   * writing the Traefik dynamic config (`traefik-config.yml`) for it, but never
+   * creates, starts or removes a Traefik container and never binds host ports. */
+  traefikMode: 'managed' | 'external';
   dashboardAuthUser: string;
   dashboardAuthPassword: string;
   logLevel: import('../../shared/types').LogLevel;
@@ -130,6 +135,13 @@ function resolvePublicBaseUrl(
   return 'http://localhost:3000';
 }
 
+export function parseTraefikMode(value: string | undefined): 'managed' | 'external' {
+  const mode = (value || '').trim().toLowerCase();
+  if (mode === '' || mode === 'managed') return 'managed';
+  if (mode === 'external') return 'external';
+  throw new Error(`TRAEFIK_MODE must be "managed" or "external", got "${value}"`);
+}
+
 export function loadConfig(): Config {
   const pmDomainsEnv = process.env.PACKAGE_MANAGER_DOMAINS?.trim();
 
@@ -165,6 +177,7 @@ export function loadConfig(): Config {
     dashboardSubdomain,
     acmeEmail: process.env.ACME_EMAIL || '',
     traefikImage: process.env.TRAEFIK_IMAGE || 'traefik:v3',
+    traefikMode: parseTraefikMode(process.env.TRAEFIK_MODE),
     dashboardAuthUser: process.env.DASHBOARD_AUTH_USER || '',
     dashboardAuthPassword: process.env.DASHBOARD_AUTH_PASSWORD || '',
     logLevel: (process.env.LOG_LEVEL || 'info') as import('../../shared/types').LogLevel,

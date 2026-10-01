@@ -1,0 +1,14 @@
+# TRAEFIK_MODE=external: another reverse proxy owns ingress, so the
+# orchestrator only writes traefik-config.yml and never starts Traefik.
+# The dashboard is not on Traefik either; it sits behind "the proxy" at an
+# https BETTER_AUTH_URL, which is what turns passkeys on in this setup.
+# Tests still reach the orchestrator on http://localhost:3000, hence the
+# extra trusted origin.
+services:
+  agentor-orchestrator:
+    environment:
+      - TRAEFIK_MODE=external
+      - BETTER_AUTH_URL=https://agentor.docker.localhost
+      - BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:3000
+      - DASHBOARD_SUBDOMAIN=
+      - DASHBOARD_BASE_DOMAIN=

@@ -136,7 +136,23 @@ log "Inner dockerd ready (pid $DOCKERD_PID)."
 # that breaks BuildKit's internal state on the next build.
 # ---------------------------------------------------------------------------
 log "Cleaning stale state (keeping images for build cache)..."
-docker compose -f /opt/test-stack/stack.yml -p agentor-test down -v --remove-orphans > /dev/null 2>&1 || true
+# Optional stack variant: TEST_STACK_VARIANT=<name> layers
+# variants/<name>.yml over stack.yml and sources variants/<name>.sh right
+# before the stack starts (e.g. to seed a registry or change READY_URL).
+# Specs written for a variant skip themselves unless it is active, so a
+# variant run is `TEST_STACK_VARIANT=<name> npm run test:docker -- <spec>`.
+VARIANT_DIR=/opt/test-stack/variants
+STACK_FILES=(-f /opt/test-stack/stack.yml)
+if [ -n "${TEST_STACK_VARIANT:-}" ]; then
+    if [ -f "$VARIANT_DIR/$TEST_STACK_VARIANT.yml" ]; then
+        STACK_FILES+=(-f "$VARIANT_DIR/$TEST_STACK_VARIANT.yml")
+    fi
+    log "Stack variant: $TEST_STACK_VARIANT"
+fi
+stack_compose() { docker compose "${STACK_FILES[@]}" -p agentor-test "$@"; }
+READY_URL=https://dash.docker.localhost/api/health
+
+stack_compose down -v --remove-orphans > /dev/null 2>&1 || true
 # Sweep up any orchestrator-spawned workers that aren't part of the compose
 # project — they have label `agentor.managed=true`.
 docker ps -aq --filter "label=agentor.managed" | xargs -r docker rm -f > /dev/null 2>&1 || true
@@ -184,17 +200,22 @@ log "Pre-cleaning stale playwright state on host bind mount..."
 rm -rf /work/tests/.auth /work/tests/test-results /work/tests/playwright-report 2>/dev/null || true
 
 log "Starting inner agentor stack..."
-docker compose -f /opt/test-stack/stack.yml -p agentor-test up -d
+if [ -n "${TEST_STACK_VARIANT:-}" ] && [ -f "$VARIANT_DIR/$TEST_STACK_VARIANT.sh" ]; then
+    log "Preparing stack variant $TEST_STACK_VARIANT..."
+    # shellcheck source=/dev/null
+    . "$VARIANT_DIR/$TEST_STACK_VARIANT.sh"
+fi
+stack_compose up -d
 
 # ---------------------------------------------------------------------------
 # Phase 4: wait for orchestrator (via traefik on https://dash.docker.localhost)
 # Traefik publishes 80/443 to the test-runner network namespace; *.localhost
 # now resolves to 127.0.0.1 for both libc and c-ares.
 # ---------------------------------------------------------------------------
-log "Waiting for https://dash.docker.localhost/api/health ..."
+log "Waiting for $READY_URL ..."
 READY=0
 for i in $(seq 1 180); do
-    if curl -fsk --max-time 2 https://dash.docker.localhost/api/health > /dev/null 2>&1; then
+    if curl -fsk --max-time 2 "$READY_URL" > /dev/null 2>&1; then
         READY=1
         log "Orchestrator ready after ${i}s."
         break
@@ -203,8 +224,8 @@ for i in $(seq 1 180); do
 done
 if [ "$READY" != "1" ]; then
     err "Orchestrator did not become ready within 180s. Stack logs:"
-    docker compose -f /opt/test-stack/stack.yml -p agentor-test logs --tail 200 >&2 || true
-    docker compose -f /opt/test-stack/stack.yml -p agentor-test down -v --remove-orphans 2>/dev/null || true
+    stack_compose logs --tail 200 >&2 || true
+    stack_compose down -v --remove-orphans 2>/dev/null || true
     exit 1
 fi
 
@@ -233,7 +254,7 @@ if [ "${DEBUG_KEEP_ALIVE:-0}" = "1" ]; then
 fi
 
 log "Tearing down inner agentor stack..."
-docker compose -f /opt/test-stack/stack.yml -p agentor-test down -v --remove-orphans 2>/dev/null || true
+stack_compose down -v --remove-orphans 2>/dev/null || true
 
 log "Done. Exit code: $EXIT"
 exit $EXIT
