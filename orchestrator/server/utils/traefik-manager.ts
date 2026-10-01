@@ -8,6 +8,7 @@ import type { DomainMappingStore, DomainMapping } from './domain-mapping-store';
 import type { PortMappingStore, PortMapping } from './port-mapping-store';
 import type { StorageManager } from './storage';
 import type { SelfSignedCertManager } from './selfsigned-certs';
+import { pullOptionsFor } from './registry-auth';
 
 const TRAEFIK_CONTAINER_NAME = 'agentor-traefik';
 const TRAEFIK_LABEL = 'agentor.managed';
@@ -791,7 +792,7 @@ export class TraefikManager {
       await this.docker.getImage(image).inspect();
     } catch {
       useLogger().info(`[traefik-manager] pulling image ${image}...`);
-      const stream = await this.docker.pull(image);
+      const stream = await this.docker.pull(image, pullOptionsFor(image));
       // Guard the pull with a deadline. Every reconcile()/forceRecreate() chains
       // onto a single reconcileQueue, so a registry that stalls mid-pull (held
       // connection, no bytes) would otherwise block *all* future Traefik

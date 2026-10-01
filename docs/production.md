@@ -5,7 +5,7 @@
 Automatic image update detection and per-image or bulk updates for production deployments. Active when `WORKER_IMAGE_PREFIX` is set (GHCR images) and/or `BASE_DOMAINS` is set (Traefik). Tracks three images: orchestrator, worker (GHCR), and traefik (Docker Hub).
 
 **Architecture:**
-- `UpdateChecker` (`update-checker.ts`): Registry-agnostic digest checker. Parses image references (`parseImageRef`) to handle GHCR (`ghcr.io/org/repo:tag`), Docker Hub user images (`user/repo:tag`), and official images (`traefik:v3` → `library/traefik`). Token acquisition (`getRegistryToken`) handles GHCR (Basic auth + Bearer) and Docker Hub (anonymous token) separately. Polls every 5 minutes.
+- `UpdateChecker` (`update-checker.ts`): Registry-agnostic digest checker. Parses image references (`parseImageRef`) to handle GHCR (`ghcr.io/org/repo:tag`), Docker Hub user images (`user/repo:tag`), and official images (`traefik:v3` → `library/traefik`). Token acquisition (`getRegistryToken`) handles GHCR (Basic auth + Bearer) and Docker Hub (anonymous token) separately; any other registry is asked for its `WWW-Authenticate` challenge and authenticated against the realm it names (Bearer token) or with Basic auth. Polls every 5 minutes.
 - `UpdateNotification.vue`: Sidebar component showing per-image status with individual "Update" buttons and a bulk "Update All" button
 - `useUpdates.ts`: composable for update status polling (60s), `applyUpdates()` for bulk, `applyImage(key)` for per-image updates
 
@@ -13,6 +13,8 @@ Automatic image update detection and per-image or bulk updates for production de
 1. Worker: pull new image → workers use new image on next create (existing workers keep the previous image until rebuilt)
 2. Traefik: pull new image → recreate Traefik container (via `TraefikManager.forceRecreate()`) → TLS certs persist on named volume
 3. Orchestrator: pull new image → create replacement container with temp name (`-next`) → spawn a one-shot swapper container (`-swapper`, `AutoRemove: true`) that uses the Docker socket to stop→remove→rename→start the replacement → UI polls `/api/health` until server returns. The swapper is needed because stopping the orchestrator's own container kills the Node.js process, so the remaining steps (remove, create, start) can't run in-process.
+
+**Private registries:** `registry-auth.ts` resolves credentials per registry host — first from `REGISTRY_CREDENTIALS` (`host=username:password`, comma-separated; `docker.io` for Docker Hub), then from a docker `config.json` (`$DOCKER_CONFIG/config.json` or `~/.docker/config.json`, inline `auths` only, re-read on every lookup). They are passed to every pull the orchestrator makes (`authconfig`) and to the digest checks. Without either, pulls and checks stay anonymous. `ORCHESTRATOR_IMAGE` may be fully qualified (its first path segment is a registry host), in which case `WORKER_IMAGE_PREFIX` is not prepended — so a self-built orchestrator in its own registry is checked and updated in place instead of being swapped for the prefixed upstream image.
 
 **Per-image updates:** The apply endpoint accepts an optional `{ images: UpdatableImage[] }` body to pull only specific images. The `UpdatableImage` type (`'orchestrator' | 'worker' | 'traefik'`) is defined in `shared/types.ts`.
 

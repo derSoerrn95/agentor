@@ -4,7 +4,7 @@ Comprehensive end-to-end test suite for the Agentor platform using Playwright an
 
 ## Overview
 
-- **~1468 tests** across 110 test files (~918 API + ~550 UI)
+- **~1471 tests** across 111 test files (~921 API + ~550 UI)
 - **API tests**: headless, no browser needed, fast execution
 - **UI tests**: Desktop Chrome (1920x1080), real browser interactions
 - **Terminal tests**: WebSocket-based command execution and agent CLI prompting
@@ -79,6 +79,12 @@ npm run test:docker:clean
 
 The runner uses `docker.localhost` and `docker2.localhost` as base domains with self-signed wildcard certs, dashboard at `https://dash.docker.localhost`. Traefik publishes 80/443 inside the runner's own network namespace, and `*.localhost` resolves to `127.0.0.1` so playwright reaches it without any `/etc/hosts` setup. The runner's `agentor-test-runner-docker` volume persists between runs so the inner image builds are cached — first run is slow, subsequent runs start fast. Reports and `.auth` cookies are written back to `tests/` on the host because the project source is bind-mounted into the runner. Works under triple-nested DinD (host → user's worker → test-runner → inner orchestrator → inner workers) since every level uses overlay2 on a volume.
 
+Some behaviour only exists under an orchestrator configuration the default stack can't use without breaking other tests (e.g. `TRAEFIK_MODE=external`). A **stack variant** changes it for one run: `TEST_STACK_VARIANT=<name>` layers `tests/docker/variants/<name>.yml` over the stack and sources `<name>.sh` before it starts (see `tests/docker/variants/README.md`). Specs that need a variant skip themselves without it, so plain `npm run test:docker` is unaffected:
+
+```bash
+TEST_STACK_VARIANT=<name> npm run test:docker -- --project=api <spec>
+```
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -105,7 +111,7 @@ tests/
 
 ## Test Categories
 
-### API Tests (~918 tests, 65 files)
+### API Tests (~921 tests, 66 files)
 
 | File | Tests | Coverage |
 |------|-------|----------|
@@ -151,6 +157,7 @@ tests/
 | `worker-env-vars.spec.ts` | 5 | `GET /api/worker-env-vars` — list + `{name, description}` fields, presence of the env vars a worker actually receives (ENVIRONMENT/CAPABILITIES/INSTRUCTIONS/WORKER/ORCHESTRATOR_URL/WORKER_CONTAINER_NAME/EXPOSE_*), and the key regression: orchestrator-wide settings (BETTER_AUTH_* / DASHBOARD_* / ACME_EMAIL / BASE_DOMAINS / LOG_*) and per-user secrets (GITHUB_TOKEN / *_API_KEY) are NEVER listed (they are not passed to workers) |
 | `github.spec.ts` | 14 | Repos list, username, orgs, repo field validation, branches, branch field validation, create repo validation (missing owner/name, empty owner/name, no token), response shape validation, non-existent repo branches |
 | `updates.spec.ts` | 11 | Update status, manual check trigger, apply rejection, response structure (3 image keys — orchestrator/worker/traefik, no mapper), check consistency |
+| `registry-credentials.spec.ts` | 3 | Private registry (needs `TEST_STACK_VARIANT=registry`, skipped otherwise; a `registry:2` with htpasswd + TLS, the runner's docker CLI holds no credentials): the update check authenticates via `REGISTRY_CREDENTIALS` (worker) and via a mounted docker `config.json` (fully qualified `ORCHESTRATOR_IMAGE`, used without `WORKER_IMAGE_PREFIX`); creating a worker pulls its image from the private registry; a newly pushed worker image is detected (`updateAvailable`) and pulled by `POST /api/updates/apply` |
 | `traefik-unified.spec.ts` | 8 | Merged-mapper regression tests: `/api/log-sources` never returns `mapper`; `/api/updates` has no `mapper` key; `UpdatableImage` enum is 3 values; port mapping create/delete works while Traefik is up for domain mappings; port + domain mapping can coexist on the same worker; settings expose no `MAPPER_IMAGE` |
 | `traefik-robustness.spec.ts` | 4 | Misconfig safety (the "a bad port/domain mapping wedges Traefik and locks me out" regression): reserved web-entrypoint ports 80/443 rejected with 409 (gated on dashboard/web entrypoints active) with no store leak; a reserved-port rejection does NOT wedge Traefik (health stays ok, the earlier valid mapping survives, and a NEW valid mapping still applies — proving the recreate path is intact); duplicate external port returns 409 (session handler now matches worker-self) and leaves Traefik healthy |
 | `usage.spec.ts` | 7 | Per-user usage: GET/POST require auth (401 unauth), refresh populates 3 agents for the caller, refresh-then-get returns the same list, agent shape after refresh, per-user isolation (user B's OAuth token doesn't show up in user A's status) |
