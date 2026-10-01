@@ -53,10 +53,13 @@ export default defineNitroPlugin(async (nitroApp) => {
   containerManager.setUserCredentialManager(userCredentialManager);
 
   // All stores load independently; built-in seeding also writes to a separate
-  // defaults/ file per store, so we fan them out. `containerManager.sync()` is
-  // a Docker API roundtrip and is independent of store state (it only reads
-  // workers via optional chaining); it runs in parallel here and
-  // `reconcileWorkers()` below re-upserts once the worker store is ready.
+  // defaults/ file per store, so we fan them out. `containerManager.sync()`
+  // runs AFTER them: it resolves each running container's owner from the
+  // worker store, and without a loaded store every worker came back with an
+  // empty userId — which `reconcileWorkers()` then persisted to
+  // `users/workers.json` (ENOTDIR in the usage checker, an orphan-sweeper
+  // removal on every start), and which made worker-self API calls attribute
+  // new mappings to no user until the dashboard's next list re-synced.
   const environmentStore = useEnvironmentStore();
   const capabilityStore = useCapabilityStore();
   const instructionStore = useInstructionStore();
@@ -86,13 +89,13 @@ export default defineNitroPlugin(async (nitroApp) => {
     workerStore.init(),
     portMappingStore.init(),
     domainMappingStore.init(),
-    containerManager.sync(),
   ]);
 
   containerManager.setEnvironmentStore(environmentStore);
   containerManager.setCapabilityStore(capabilityStore);
   containerManager.setInstructionStore(instructionStore);
   containerManager.setWorkerStore(workerStore);
+  await containerManager.sync();
   await containerManager.reconcileWorkers();
 
   // Mappings survive stop/archive/unarchive/rebuild, so the cleanup set

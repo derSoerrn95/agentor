@@ -4,7 +4,7 @@ Comprehensive end-to-end test suite for the Agentor platform using Playwright an
 
 ## Overview
 
-- **~1468 tests** across 110 test files (~918 API + ~550 UI)
+- **~1469 tests** across 111 test files (~919 API + ~550 UI)
 - **API tests**: headless, no browser needed, fast execution
 - **UI tests**: Desktop Chrome (1920x1080), real browser interactions
 - **Terminal tests**: WebSocket-based command execution and agent CLI prompting
@@ -79,6 +79,12 @@ npm run test:docker:clean
 
 The runner uses `docker.localhost` and `docker2.localhost` as base domains with self-signed wildcard certs, dashboard at `https://dash.docker.localhost`. Traefik publishes 80/443 inside the runner's own network namespace, and `*.localhost` resolves to `127.0.0.1` so playwright reaches it without any `/etc/hosts` setup. The runner's `agentor-test-runner-docker` volume persists between runs so the inner image builds are cached — first run is slow, subsequent runs start fast. Reports and `.auth` cookies are written back to `tests/` on the host because the project source is bind-mounted into the runner. Works under triple-nested DinD (host → user's worker → test-runner → inner orchestrator → inner workers) since every level uses overlay2 on a volume.
 
+Some behaviour only exists under an orchestrator configuration the default stack can't use without breaking other tests (e.g. `TRAEFIK_MODE=external`). A **stack variant** changes it for one run: `TEST_STACK_VARIANT=<name>` layers `tests/docker/variants/<name>.yml` over the stack and sources `<name>.sh` before it starts (see `tests/docker/variants/README.md`). Specs that need a variant skip themselves without it, so plain `npm run test:docker` is unaffected:
+
+```bash
+TEST_STACK_VARIANT=<name> npm run test:docker -- --project=api <spec>
+```
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -105,7 +111,7 @@ tests/
 
 ## Test Categories
 
-### API Tests (~918 tests, 65 files)
+### API Tests (~919 tests, 66 files)
 
 | File | Tests | Coverage |
 |------|-------|----------|
@@ -162,6 +168,7 @@ tests/
 | `mcp-servers-loaded.spec.ts` | 6 | MCP server verification: Claude config keys + commands via jq, Codex `mcp list` output + enabled status, Gemini config keys + commands via jq |
 | `worker-hostname.spec.ts` | 2 | In-container `hostname` equals the Docker short container id (no custom `Hostname` is set — NOT the worker UUID and NOT a friendly label); `containerName = agentor-worker-<id>` with no `userId` segment and no double `agentor-worker-` prefix. Regression for the container-name construction now that `id` is a server-minted UUID v4. |
 | `worker-self.spec.ts` | 13 | Worker-self routes (no session, identified by Docker source IP): `/api/worker-self/info` returns the calling worker's identity, hitting it from outside the docker network is 401, port mapping create/list/delete works from inside the worker, a `workerId` body field is ignored (caller IP wins), list filters out other workers' mappings, DELETE refuses other workers' mappings (403), duplicate-port create returns 409 (not 500), garbage-port delete is 400, port/domain-mapper + usage status shapes, and the **exposeApis gate** — a worker on an environment that disables a flag gets 403 from the corresponding worker-self route while an all-exposed env gets 200 |
+| `startup-worker-owner.spec.ts` | 1 | Restarts the orchestrator (needs `TEST_STACK_VARIANT=restart`, skipped otherwise): right after the restart, a worker's `/api/worker-self/info` already carries its owner's `userId`; no ownerless `users/workers.json` is written and the log has no `ENOTDIR` / orphan-sweeper cleanup |
 | `worker-metrics.spec.ts` | 10 | Per-worker resource metrics (all via the Docker API; no host metrics): `GET /api/worker-metrics` returns a workers array + auth gating; `POST /api/worker-metrics/refresh` forces a sample + auth; per-worker `GET /api/containers/:id/metrics` snapshot shape, 404 unknown, 401 unauth; a poll confirming a running worker appears once sampled; disk is non-zero after a forced sample; and a deep check that writing 40 MB to a NON-volume path (`/home/agent/.disktest`) grows `diskUsedBytes` — proving the writable-layer (`SizeRw`) is counted, not just the volume `du` |
 | `worker-export-import.spec.ts` | 9 | Export streams a `.tar` bundle (content-type/disposition; manifest + workspace.tar.gz + agents.tar.gz present, rootfs.tar.gz absent with `includeRootfs=false`), export 404/401; import rejects a garbage bundle (400) + 401 unauth; **round-trip**: upload a marker file → export → import (fresh UUID id, `agentor-worker-<id>` name, displayName override) → boot → download workspace and confirm the marker file restored; and port-mapping recreation for the imported worker (export with a mapping, remove source, import, assert mapping re-created on the new containerName). Round-trip uses `includeRootfs=false` for speed — the docker-export rootfs path is exercised via the default-on UI export, not in CI. |
 | `github-repos.spec.ts` | 3 | `GET /api/github/repos`: requires auth; a fresh user with no token → `tokenConfigured:false` + empty repos; a configured-but-bogus token → `tokenConfigured:true` with a surfaced `error` (regression for the old "any failure looks like no token" masking). Uses isolated test users. |
