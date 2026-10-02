@@ -193,3 +193,16 @@ export function loadConfig(): Config {
     mcpEnabled: (process.env.MCP_ENABLED ?? 'true').trim().toLowerCase() !== 'false',
   };
 }
+
+/** The orchestrator image reference used for update checks and self-replace.
+ * WORKER_IMAGE_PREFIX is prepended as usual, unless ORCHESTRATOR_IMAGE already
+ * names a registry (its first path segment is a host: contains `.` or `:`, or
+ * is `localhost`, per Docker's reference grammar). That lets a self-built
+ * orchestrator live in another registry than the worker image, without the
+ * update button swapping it back to the prefixed upstream image. */
+export function orchestratorImageRef(config: Pick<Config, 'workerImagePrefix' | 'orchestratorImage'>): string {
+  const image = config.orchestratorImage;
+  const first = image.split('/')[0] ?? '';
+  const hasRegistry = image.includes('/') && (first.includes('.') || first.includes(':') || first === 'localhost');
+  return hasRegistry ? image : (config.workerImagePrefix || '') + image;
+}

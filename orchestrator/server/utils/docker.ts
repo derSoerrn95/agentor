@@ -6,6 +6,7 @@ import { getAppType } from './apps';
 import { renderUserEnvVars } from './user-env-store';
 import type { MountConfig, TmuxWindow, AppInstanceInfo, NetworkMode, ExposeApis, UserEnvVars } from '../../shared/types';
 import type { StorageManager } from './storage';
+import { pullOptionsFor } from './registry-auth';
 
 export interface EnvironmentJsonPayload {
   networkMode: string;
@@ -734,7 +735,7 @@ export class DockerService {
       await this.docker.getImage(image).inspect();
     } catch {
       useLogger().info(`[docker] pulling image ${image}...`);
-      const stream = await this.docker.pull(image);
+      const stream = await this.docker.pull(image, pullOptionsFor(image));
       await new Promise<void>((resolve, reject) => {
         this.docker.modem.followProgress(stream, (err: Error | null) => (err ? reject(err) : resolve()));
       });
