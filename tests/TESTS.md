@@ -4,7 +4,7 @@ Comprehensive end-to-end test suite for the Agentor platform using Playwright an
 
 ## Overview
 
-- **~1468 tests** across 110 test files (~918 API + ~550 UI)
+- **~1473 tests** across 111 test files (~923 API + ~550 UI)
 - **API tests**: headless, no browser needed, fast execution
 - **UI tests**: Desktop Chrome (1920x1080), real browser interactions
 - **Terminal tests**: WebSocket-based command execution and agent CLI prompting
@@ -79,6 +79,12 @@ npm run test:docker:clean
 
 The runner uses `docker.localhost` and `docker2.localhost` as base domains with self-signed wildcard certs, dashboard at `https://dash.docker.localhost`. Traefik publishes 80/443 inside the runner's own network namespace, and `*.localhost` resolves to `127.0.0.1` so playwright reaches it without any `/etc/hosts` setup. The runner's `agentor-test-runner-docker` volume persists between runs so the inner image builds are cached — first run is slow, subsequent runs start fast. Reports and `.auth` cookies are written back to `tests/` on the host because the project source is bind-mounted into the runner. Works under triple-nested DinD (host → user's worker → test-runner → inner orchestrator → inner workers) since every level uses overlay2 on a volume.
 
+Some behaviour only exists under an orchestrator configuration the default stack can't use without breaking other tests (e.g. `TRAEFIK_MODE=external`). A **stack variant** changes it for one run: `TEST_STACK_VARIANT=<name>` layers `tests/docker/variants/<name>.yml` over the stack and sources `<name>.sh` before it starts (see `tests/docker/variants/README.md`). Specs that need a variant skip themselves without it, so plain `npm run test:docker` is unaffected:
+
+```bash
+TEST_STACK_VARIANT=<name> npm run test:docker -- --project=api <spec>
+```
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -105,7 +111,7 @@ tests/
 
 ## Test Categories
 
-### API Tests (~918 tests, 65 files)
+### API Tests (~923 tests, 66 files)
 
 | File | Tests | Coverage |
 |------|-------|----------|
@@ -153,6 +159,7 @@ tests/
 | `updates.spec.ts` | 11 | Update status, manual check trigger, apply rejection, response structure (3 image keys — orchestrator/worker/traefik, no mapper), check consistency |
 | `traefik-unified.spec.ts` | 8 | Merged-mapper regression tests: `/api/log-sources` never returns `mapper`; `/api/updates` has no `mapper` key; `UpdatableImage` enum is 3 values; port mapping create/delete works while Traefik is up for domain mappings; port + domain mapping can coexist on the same worker; settings expose no `MAPPER_IMAGE` |
 | `traefik-robustness.spec.ts` | 4 | Misconfig safety (the "a bad port/domain mapping wedges Traefik and locks me out" regression): reserved web-entrypoint ports 80/443 rejected with 409 (gated on dashboard/web entrypoints active) with no store leak; a reserved-port rejection does NOT wedge Traefik (health stays ok, the earlier valid mapping survives, and a NEW valid mapping still applies — proving the recreate path is intact); duplicate external port returns 409 (session handler now matches worker-self) and leaves Traefik healthy |
+| `traefik-external.spec.ts` | 5 | `TRAEFIK_MODE=external` (needs `TEST_STACK_VARIANT=external`, skipped otherwise): settings report the mode; a domain mapping is written to `traefik-config.yml` and removed again on delete without any Traefik container ever starting; a leftover managed-mode `agentor-traefik` is removed on the next apply; the update checker reports `traefik: null`; passkeys are enabled from an https `BETTER_AUTH_URL` (rpID = its host) |
 | `usage.spec.ts` | 7 | Per-user usage: GET/POST require auth (401 unauth), refresh populates 3 agents for the caller, refresh-then-get returns the same list, agent shape after refresh, per-user isolation (user B's OAuth token doesn't show up in user A's status) |
 | `logs.spec.ts` | 36 | Log query response shape, entry fields, valid levels/sources, source/level/multi-level/search filtering, limit control/default/max clamping, newest-first ordering, ISO timestamps, combined filters, log-sources endpoint, container messages have no leading Docker timestamp (regression for the TTY \r split bug), orchestrator self-stdout captured with sourceId, until is exclusive (boundary entry not duplicated), backwards pagination via until walks contiguously without skipping, hasMore reports remaining matches, clear logs (serialized), clear idempotency |
 | `terminal-exec.spec.ts` | 14 | WebSocket connect, initial output, echo command, pwd /workspace, HOME /home/agent, exit codes, named tmux window, resize, concurrent window isolation, multiline output, whoami agent user, non-existent container, ws-* tmux session cleanup on disconnect, multiple connections cleanup |

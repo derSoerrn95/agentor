@@ -61,6 +61,10 @@ Mappings can also be marked **wildcard**, in which case the router matches any s
 
 Like port mappings, domain mappings are keyed by the stable `containerName` and persist across worker stop/restart, archive/unarchive, and rebuild — only permanent deletion removes them. Traefik routes to the worker by `containerName` via Docker DNS, so a rebuilt/unarchived worker is picked up automatically after its new container joins the network.
 
+### External Mode (`TRAEFIK_MODE=external`)
+
+For deployments where another reverse proxy already owns 80/443 (and often the dashboard's TLS). With `TRAEFIK_MODE=external`, `TraefikManager` never creates the `agentor-traefik` container: every reconcile/recreate just (re)writes `<DATA_DIR>/traefik-config.yml` — the same file-provider config the bundled Traefik reads — and records it as last-good. There is no host-port pre-flight (the ports belong to the external proxy), and a Traefik left over from an earlier managed-mode run is removed so it cannot hold those ports. Domain mappings are accepted and stored exactly as in managed mode; publishing them is the external proxy's job (e.g. a Traefik with a file provider on that directory, or a bridge that translates the file/store into the proxy's own config). The update checker and Images panel leave Traefik out. Pair it with an `https://` `BETTER_AUTH_URL` to keep passkeys when the dashboard is served by that proxy.
+
 ### TLS Challenge Types
 
 Each base domain in `BASE_DOMAINS` specifies its own TLS challenge type:

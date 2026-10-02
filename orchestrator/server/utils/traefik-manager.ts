@@ -141,6 +141,17 @@ export class TraefikManager {
     });
   }
 
+  /** External mode: another reverse proxy consumes `traefik-config.yml`, so
+   * applying a change means writing that file and nothing else. No container,
+   * no host-port pre-flight — the ports belong to the external proxy. A Traefik
+   * left behind from an earlier managed-mode run is removed so it cannot hold
+   * ports the external proxy needs. */
+  private async applyExternal(m: Mappings): Promise<void> {
+    await this.removeTraefik();
+    await this.writeTraefikConfig(m);
+    this.lastGoodMappings = m;
+  }
+
   /** Layer 1 — reject a port that structurally cannot be a mapping because
    * Traefik binds it on the host for its own web entrypoints. 80/443 are the
    * `web`/`websecure` entrypoints that domain routing and the dashboard
@@ -179,6 +190,10 @@ export class TraefikManager {
 
   private async forceRecreateNow(): Promise<void> {
     const m = this.currentMappings();
+    if (this.config.traefikMode === 'external') {
+      await this.applyExternal(m);
+      return;
+    }
     if (!this.shouldRun(m)) {
       await this.removeTraefik();
       this.lastGoodMappings = null;
@@ -191,6 +206,11 @@ export class TraefikManager {
 
   private async reconcileNow(): Promise<void> {
     const m = this.currentMappings();
+
+    if (this.config.traefikMode === 'external') {
+      await this.applyExternal(m);
+      return;
+    }
 
     if (!this.shouldRun(m)) {
       await this.removeTraefik();
