@@ -1,0 +1,41 @@
+# Private registry: a registry:2 with htpasswd auth and a self-signed TLS
+# cert (registry.sh generates both and pushes the freshly built images into
+# it). The same registry answers as two hosts, one per credential source:
+#   registry.localhost:5443   worker images, via REGISTRY_CREDENTIALS
+#   registry2.localhost:5443  the fully qualified ORCHESTRATOR_IMAGE, via a
+#                             docker config.json mounted into the orchestrator
+# The inner dockerd reaches it through the published port (dnsmasq resolves
+# *.localhost to 127.0.0.1), the orchestrator through the network aliases.
+services:
+  registry:
+    image: registry:2
+    container_name: agentor-test-registry
+    restart: unless-stopped
+    ports:
+      - "5443:5443"
+    environment:
+      - REGISTRY_HTTP_ADDR=0.0.0.0:5443
+      - REGISTRY_HTTP_TLS_CERTIFICATE=/opt/test-registry/ca.crt
+      - REGISTRY_HTTP_TLS_KEY=/opt/test-registry/registry.key
+      - REGISTRY_AUTH=htpasswd
+      - REGISTRY_AUTH_HTPASSWD_REALM=agentor-test
+      - REGISTRY_AUTH_HTPASSWD_PATH=/opt/test-registry/htpasswd
+    volumes:
+      - /opt/test-registry:/opt/test-registry:ro
+    networks:
+      agentor-net:
+        aliases:
+          - registry.localhost
+          - registry2.localhost
+
+  agentor-orchestrator:
+    depends_on:
+      - registry
+    volumes:
+      - /opt/test-registry/ca.crt:/opt/test-registry/ca.crt:ro
+      - /opt/test-registry/docker-config.json:/root/.docker/config.json:ro
+    environment:
+      - NODE_EXTRA_CA_CERTS=/opt/test-registry/ca.crt
+      - WORKER_IMAGE_PREFIX=registry.localhost:5443/
+      - ORCHESTRATOR_IMAGE=registry2.localhost:5443/agentor-orchestrator:latest
+      - REGISTRY_CREDENTIALS=registry.localhost:5443=agentor:agentor-test-registry-pw

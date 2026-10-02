@@ -4,7 +4,7 @@ Comprehensive end-to-end test suite for the Agentor platform using Playwright an
 
 ## Overview
 
-- **~1473 tests** across 111 test files (~923 API + ~550 UI)
+- **~1476 tests** across 112 test files (~926 API + ~550 UI)
 - **API tests**: headless, no browser needed, fast execution
 - **UI tests**: Desktop Chrome (1920x1080), real browser interactions
 - **Terminal tests**: WebSocket-based command execution and agent CLI prompting
@@ -111,7 +111,7 @@ tests/
 
 ## Test Categories
 
-### API Tests (~923 tests, 66 files)
+### API Tests (~926 tests, 67 files)
 
 | File | Tests | Coverage |
 |------|-------|----------|
@@ -157,6 +157,7 @@ tests/
 | `worker-env-vars.spec.ts` | 5 | `GET /api/worker-env-vars` — list + `{name, description}` fields, presence of the env vars a worker actually receives (ENVIRONMENT/CAPABILITIES/INSTRUCTIONS/WORKER/ORCHESTRATOR_URL/WORKER_CONTAINER_NAME/EXPOSE_*), and the key regression: orchestrator-wide settings (BETTER_AUTH_* / DASHBOARD_* / ACME_EMAIL / BASE_DOMAINS / LOG_*) and per-user secrets (GITHUB_TOKEN / *_API_KEY) are NEVER listed (they are not passed to workers) |
 | `github.spec.ts` | 14 | Repos list, username, orgs, repo field validation, branches, branch field validation, create repo validation (missing owner/name, empty owner/name, no token), response shape validation, non-existent repo branches |
 | `updates.spec.ts` | 11 | Update status, manual check trigger, apply rejection, response structure (3 image keys — orchestrator/worker/traefik, no mapper), check consistency |
+| `registry-credentials.spec.ts` | 3 | Private registry (needs `TEST_STACK_VARIANT=registry`, skipped otherwise; a `registry:2` with htpasswd + TLS, the runner's docker CLI holds no credentials): the update check authenticates via `REGISTRY_CREDENTIALS` (worker) and via a mounted docker `config.json` (fully qualified `ORCHESTRATOR_IMAGE`, used without `WORKER_IMAGE_PREFIX`); creating a worker pulls its image from the private registry; a newly pushed worker image is detected (`updateAvailable`) and pulled by `POST /api/updates/apply` |
 | `traefik-unified.spec.ts` | 8 | Merged-mapper regression tests: `/api/log-sources` never returns `mapper`; `/api/updates` has no `mapper` key; `UpdatableImage` enum is 3 values; port mapping create/delete works while Traefik is up for domain mappings; port + domain mapping can coexist on the same worker; settings expose no `MAPPER_IMAGE` |
 | `traefik-robustness.spec.ts` | 4 | Misconfig safety (the "a bad port/domain mapping wedges Traefik and locks me out" regression): reserved web-entrypoint ports 80/443 rejected with 409 (gated on dashboard/web entrypoints active) with no store leak; a reserved-port rejection does NOT wedge Traefik (health stays ok, the earlier valid mapping survives, and a NEW valid mapping still applies — proving the recreate path is intact); duplicate external port returns 409 (session handler now matches worker-self) and leaves Traefik healthy |
 | `traefik-external.spec.ts` | 5 | `TRAEFIK_MODE=external` (needs `TEST_STACK_VARIANT=external`, skipped otherwise): settings report the mode; a domain mapping is written to `traefik-config.yml` and removed again on delete without any Traefik container ever starting; a leftover managed-mode `agentor-traefik` is removed on the next apply; the update checker reports `traefik: null`; passkeys are enabled from an https `BETTER_AUTH_URL` (rpID = its host) |

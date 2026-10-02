@@ -1,5 +1,6 @@
 import Docker from 'dockerode';
-import type { Config } from './config';
+import { orchestratorImageRef, type Config } from './config';
+import { basicAuthHeader, pullOptionsFor, registryCredential, type RegistryCredential } from './registry-auth';
 import type { ImageUpdateInfo, UpdateStatus, ApplyResult, UpdatableImage, PruneResult } from '../../shared/types';
 
 interface ImageRef {
@@ -63,7 +64,7 @@ export class UpdateChecker {
   private async getLocalImages(): Promise<void> {
     const prefix = this.config.workerImagePrefix;
     const images: { key: keyof Pick<UpdateStatus, 'orchestrator' | 'worker' | 'traefik'>; name: string }[] = [
-      { key: 'orchestrator', name: (prefix || '') + this.config.orchestratorImage },
+      { key: 'orchestrator', name: orchestratorImageRef(this.config) },
       { key: 'worker', name: (prefix || '') + this.config.workerImage },
       // External mode: Traefik is not ours, so there is nothing to show or update.
       ...(this.config.traefikMode === 'managed'
@@ -100,7 +101,7 @@ export class UpdateChecker {
 
     if (hasPrefix) {
       checks.push(
-        this.checkImage(prefix + this.config.orchestratorImage),
+        this.checkImage(orchestratorImageRef(this.config)),
         this.checkImage(prefix + this.config.workerImage),
       );
     } else {
@@ -198,22 +199,25 @@ export class UpdateChecker {
     return { registry: 'registry-1.docker.io', repo: fullImageName.includes('/') ? fullImageName : `library/${fullImageName}`, tag: 'latest' };
   }
 
-  private async getRegistryToken(ref: ImageRef): Promise<string> {
-    // Anonymous token is sufficient for public images on both registries.
-    // Private GHCR images are out of scope for the orchestrator's self-update —
-    // deploy via `docker login ghcr.io` on the host instead.
+  private async getRegistryToken(ref: ImageRef, cred?: RegistryCredential): Promise<string> {
+    // Anonymous tokens cover public images; with a credential from the host's
+    // `docker login` (registry-auth.ts) private ones work too.
     const tokenUrl = ref.registry === 'ghcr.io'
       ? `https://ghcr.io/token?scope=repository:${ref.repo}:pull`
       : `https://auth.docker.io/token?service=registry.docker.io&scope=repository:${ref.repo}:pull`;
-    return this.fetchBearerToken(tokenUrl);
+    return this.fetchBearerToken(tokenUrl, cred);
   }
 
-  private async fetchBearerToken(tokenUrl: string): Promise<string> {
+  private async fetchBearerToken(tokenUrl: string, cred?: RegistryCredential): Promise<string> {
     try {
-      const resp = await fetch(tokenUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      const resp = await fetch(tokenUrl, {
+        ...(cred ? { headers: { Authorization: basicAuthHeader(cred) } } : {}),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
       if (resp.ok) {
-        const data = await resp.json() as { token?: string };
-        return data.token || '';
+        // Docker Hub/GHCR/GitLab return `token`; the OAuth2 variant `access_token`.
+        const data = await resp.json() as { token?: string; access_token?: string };
+        return data.token || data.access_token || '';
       }
     } catch {
       // Fall through — an anonymous token may not be required, and the
@@ -253,10 +257,30 @@ export class UpdateChecker {
     }
   }
 
+  /** Token for a registry that is neither GHCR nor Docker Hub, obtained the
+   * standard way: the registry answers an unauthenticated request with 401 and
+   * a `WWW-Authenticate: Bearer realm=...,service=...,scope=...` challenge
+   * naming its own token server (GitLab, Harbor, Gitea, registry:2, ...).
+   * Returns the Authorization header value, or '' when none is needed/possible. */
+  private async getChallengeAuth(ref: ImageRef, manifestUrl: string, headers: Record<string, string>, cred?: RegistryCredential): Promise<string> {
+    const probe = await fetch(manifestUrl, { method: 'HEAD', headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (probe.status !== 401) return '';
+    const challenge = probe.headers.get('www-authenticate') || '';
+    // Plain registry:2 behind basic auth: no token server, send the credential.
+    if (/^basic\s/i.test(challenge)) return cred ? basicAuthHeader(cred) : '';
+    if (!/^bearer\s/i.test(challenge)) return '';
+    const params: Record<string, string> = {};
+    for (const m of challenge.matchAll(/(\w+)="([^"]*)"/g)) params[m[1]!.toLowerCase()] = m[2]!;
+    if (!params.realm) return '';
+    const tokenUrl = new URL(params.realm);
+    if (params.service) tokenUrl.searchParams.set('service', params.service);
+    tokenUrl.searchParams.set('scope', params.scope || `repository:${ref.repo}:pull`);
+    const token = await this.fetchBearerToken(tokenUrl.toString(), cred);
+    return token ? `Bearer ${token}` : '';
+  }
+
   private async getRemoteDigest(fullImageName: string): Promise<string> {
     const ref = this.parseImageRef(fullImageName);
-    const token = await this.getRegistryToken(ref);
-
     const url = `https://${ref.registry}/v2/${ref.repo}/manifests/${ref.tag}`;
     const headers: Record<string, string> = {
       'Accept': [
@@ -267,8 +291,21 @@ export class UpdateChecker {
       ].join(', '),
     };
 
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    // GHCR and Docker Hub have well-known token endpoints. Any other registry
+    // names its token server in a 401 challenge; asking Docker Hub's auth
+    // server for it (the previous behaviour) always ended in a 401.
+    const knownRegistry = ref.registry === 'ghcr.io' || ref.registry === 'registry-1.docker.io';
+    const cred = registryCredential(ref.registry);
+    let authorization = '';
+    if (knownRegistry) {
+      const token = await this.getRegistryToken(ref, cred);
+      if (token) authorization = `Bearer ${token}`;
+    } else {
+      authorization = await this.getChallengeAuth(ref, url, headers, cred);
+    }
+
+    if (authorization) {
+      headers['Authorization'] = authorization;
     }
 
     const resp = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
@@ -284,11 +321,10 @@ export class UpdateChecker {
   }
 
   async pullImage(imageName: string): Promise<void> {
-    // Images pulled by the orchestrator are public — agent credentials are
-    // per-user and not available at infrastructure scope. Deploy private
-    // images with `docker login` on the host.
+    // Agent credentials are per-user and not available at infrastructure scope;
+    // private registries use the host's `docker login` (see registry-auth.ts).
     await new Promise<void>((resolve, reject) => {
-      this.docker.pull(imageName, {}, (err: Error | null, stream: NodeJS.ReadableStream | undefined) => {
+      this.docker.pull(imageName, pullOptionsFor(imageName), (err: Error | null, stream: NodeJS.ReadableStream | undefined) => {
         if (err || !stream) return reject(err || new Error('No stream returned'));
         this.docker.modem.followProgress(stream, (err2: Error | null) => {
           if (err2) reject(err2);
@@ -342,7 +378,7 @@ export class UpdateChecker {
     // Pull orchestrator image if update available
     if (hasPrefix && shouldUpdate('orchestrator') && this.status.orchestrator?.updateAvailable) {
       try {
-        await this.pullImage(prefix + this.config.orchestratorImage);
+        await this.pullImage(orchestratorImageRef(this.config));
         result.orchestratorPulled = true;
       } catch (err: unknown) {
         result.errors.push(`Orchestrator pull failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -358,7 +394,7 @@ export class UpdateChecker {
 
     const container = this.docker.getContainer(hostname);
     const info = await container.inspect();
-    const newImage = this.config.workerImagePrefix + this.config.orchestratorImage;
+    const newImage = orchestratorImageRef(this.config);
     const containerName = info.Name.replace(/^\//, '');
     const tempName = `${containerName}-next`;
     const swapperName = `${containerName}-swapper`;

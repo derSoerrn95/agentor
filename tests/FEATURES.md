@@ -533,6 +533,7 @@ The worker "detail" view is a fully editable **Worker Settings modal** (no more 
 - "Re-check" / "Check for updates" button
 - With `TRAEFIK_MODE=external` there is no Traefik row: the orchestrator neither runs nor updates Traefik
 - "Prune dangling images" button with result display
+- Private registries: the orchestrator authenticates its own pulls (worker image, orchestrator self-update, Traefik) and update checks with `REGISTRY_CREDENTIALS` (`host=user:password,...`) or a mounted docker `config.json` (inline `auths`); registries other than GHCR/Docker Hub get their token from the realm in their own `WWW-Authenticate` challenge (Bearer) or are queried with Basic auth. A fully qualified `ORCHESTRATOR_IMAGE` (`registry.example.com/me/agentor-orchestrator:tag`) is used without `WORKER_IMAGE_PREFIX`
 
 ### 15.2 Restarting State
 - Blue overlay with spinner + "Reconnecting..." + description when orchestrator restarts
